@@ -41,6 +41,15 @@ class ConnectionSettingsTest {
         assertTrue(context.getSharedPreferences(name, Context.MODE_PRIVATE).all.values.none { it.toString().contains(secret) })
     }
 
+    @Test fun mcpTokenIsEncryptedAndBoundToItsServiceAddress() {
+        settings.saveMcp("https://mediary.example.invalid/mediary", secret)
+        assertEquals(secret, ConnectionSettings(context, name).mcpToken)
+        val preferences = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        assertTrue(preferences.all.values.none { it.toString().contains(secret) })
+        preferences.edit { putString("mcpEndpoint", "https://other.example.invalid") }
+        assertEquals("", ConnectionSettings(context, name).mcpToken)
+    }
+
     @Test fun failedValidationDoesNotReplaceSavedConfiguration() {
         settings.saveDirect(address, "test-model", secret)
         try { settings.saveDirect("http://example.invalid", "another-model", "another-fake-key"); fail("Expected rejection") }

@@ -1,12 +1,10 @@
-# Mediary 医嘱整理服务
+# Mediary MCP 与草稿服务
 
-个人自用的无状态 AI 中转。默认由服务端调用智谱官方 `glm-4.7-flash`；手机只持有服务地址和访问口令。服务不保存医嘱、计划和服药历史，不负责发送用药提醒，不需要数据库。安卓仍可离线提醒和记录。
+Node.js 22 单用户服务，无第三方 npm 运行依赖。默认由 ChatGPT 的模型调用 MCP 工具保存医嘱草稿，安卓主动领取、核对并创建本地计划；这条路径无需模型 API Key。服务不负责手机提醒，不同步服药事件。
 
 ## Docker Compose 部署
 
-将仓库的整个 `server/` 目录放到服务器的独立目录，例如 `/opt/mediary/server`。以下命令均在该目录执行，需要 Docker Engine 和 Compose 插件。
-
-首次部署准备配置（已有 `.env` 时不要覆盖）：
+在服务器独立目录中放置整个 `server/`，在该目录运行：
 
 ```sh
 cp -n .env.example .env
@@ -14,18 +12,15 @@ chmod 600 .env
 openssl rand -hex 32
 ```
 
-在服务器本地编辑 `.env`，填写自己的智谱 Key 和刚生成的随机服务口令：
+在服务器本地编辑 `.env`，使用自己的实际 HTTPS 地址和刚生成的随机口令：
 
 ```dotenv
-AI_PROVIDER=zhipu
-ZHIPU_API_KEY=填入自己的智谱密钥
+PUBLIC_BASE_URL=https://your-mcp.example.com/mediary
 MEDIARY_ACCESS_TOKEN=填入生成的64位十六进制随机口令
 MEDIARY_PORT=8787
 ```
 
-上面是占位说明，不能原样运行。Key 只填在服务器，手机填写 `MEDIARY_ACCESS_TOKEN`。服务口令至少 24 字符；建议保留命令生成的随机值，不使用日常密码。不要将 `.env`、展开后的 Compose 配置或容器完整环境输出发到聊天和公开日志。
-
-`zhipu` 模式固定官方地址和 `glm-4.7-flash`，不提供切换型号的环境变量、不自动回退。响应的 `model` 也必须一致。免费与限流政策以智谱平台为准，部署本身不能保证平台未来不调整价格。
+占位值不能原样使用。口令至少 24 位，仅在手机的草稿连接设置及自己的 OAuth 授权页面输入，不放入聊天或 URL。MCP 模式不需要填写 `ZHIPU_API_KEY` / `OPENAI_API_KEY`。
 
 ```sh
 docker compose config --quiet
@@ -34,82 +29,49 @@ docker compose ps
 curl --fail http://127.0.0.1:8787/health
 ```
 
-镜像构建先执行全部服务端测试，再以非 root 用户运行。运行容器只读、限制资源、保留少量滚动启动日志。密钥通过运行时 `.env` 注入，Docker 构建上下文采用白名单，不包含 `.env`。不需要挂载数据库或文件卷。
+构建先执行服务测试，再以非 root 用户运行。容器根文件系统只读，仅 `/data` 挂载可写的 `mediary_mediary-data` 命名数据卷（项目名为 mediary 时）；该卷保存草稿、客户端和令牌摘要，更新源码不会删除它。不要执行 `docker compose down -v`，这会删除数据。医嘱在该私有卷中以明文保存，文件权限 0600，不是端到端加密。应独立备份数据卷和 `.env`，不要上传到 Git。
 
-默认只发布服务器本机的 `127.0.0.1:8787`，不会占用现有应用的 80/443 端口。若 8787 已被占用，改 `.env` 的 `MEDIARY_PORT`，并同步调整反向代理和上述 curl 命令。容器内部固定监听 8787。
+服务启动时校验配置和数据文件；文件损坏时失败，不自动覆盖为空库。当前仅支持单用户、单进程，不可多实例共享同一 JSON 文件。
 
-`/health` 只检查本地接口及配置：配置完整返回 200，缺少密钥/口令等返回 503，不调用智谱、不验证密钥在平台上是否有效。Docker 重启策略负责进程退出后的恢复，`unhealthy` 本身不触发自动重启。
+端口只发布在 `127.0.0.1:8787`，通过已有 HTTPS 反向代理访问，不向公网开放裸端口。已有服务占用该端口时修改 `MEDIARY_PORT` 并同步修改代理。
 
-## 接入现有 HTTPS 入口
+## 接入 HTTPS 与 OAuth 发现
 
-推荐给 Mediary 分配一个独立子域名，例如 `mediary.example.com`，在现有反向代理中配置证书后转发给该服务。无需改动其他应用的域名或路由。
+如果以 `/mediary` 前缀接入现有宿主机 Nginx，将 [nginx-prefix.conf.example](deploy/nginx-prefix.conf.example) 放进已有 HTTPS server 块，按实际端口调整，并确保 `PUBLIC_BASE_URL` 精确对应外部地址。模板还提供两个 RFC well-known 发现地址的精确路由；它们对带路径的 OAuth issuer 很重要。
 
-如果 Nginx 直接运行在宿主机，将下面的 location 放入该域名已有的 HTTPS server 块。端口与 `MEDIARY_PORT` 对应：
+修改代理后先 `sudo nginx -t`，通过才重载。保持 TLS 校验，不记录访问路径中的授权码、请求体或 Authorization。模板关闭本应用访问日志；不要开启请求调试日志。
 
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8787;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_connect_timeout 5s;
-    proxy_send_timeout 70s;
-    proxy_read_timeout 70s;
-    client_max_body_size 64k;
-    access_log off;
-}
-```
+如果使用独立域名根路径，可设置 `PUBLIC_BASE_URL=https://mediary.example.com`，并把该域名全部请求转发至 `http://127.0.0.1:8787`，保留路径，关闭代理缓冲和访问日志。代理运行在容器内时，应通过专用共享网络访问 `mediary-api:8787`，不能使用代理容器自身的 127.0.0.1。
 
-不要开启请求体或 Authorization 调试日志。服务自身不记录医嘱正文、访问口令或上游密钥；反向代理同样需要保持这个边界。
+## 手机和 ChatGPT 接入
 
-如果反向代理也运行在 Docker 容器内，代理里的 `127.0.0.1` 指向代理自身，无法访问本服务。可以把两个容器加入你已有的代理网络，在 `server/` 新建 `compose.proxy.yaml`：
+见 [MCP 接入说明](../docs/mcp.md)。主要接口：
 
-```yaml
-services:
-  mediary-api:
-    networks:
-      - default
-      - proxy
-networks:
-  proxy:
-    external: true
-    name: 替换成已有代理网络名
-```
+| 路径 | 权限与用途 |
+| --- | --- |
+| `POST /mcp` | OAuth，JSON-RPC 工具调用；无匿名医疗数据访问 |
+| `GET /.well-known/oauth-protected-resource` | 公开资源元数据 |
+| `GET /.well-known/oauth-authorization-server` | 公开授权服务器元数据 |
+| `/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` | DCR、授权码 + PKCE、刷新及撤销 |
+| `GET /v1/drafts` | 手机服务口令，分页领取草稿 |
+| `POST /v1/drafts/receipts` | 手机服务口令，领取及核对保存回执 |
+| `GET /health` | 本地配置状态，不调用模型、不返回医嘱或凭据 |
 
-使用 `docker compose -f compose.yaml -f compose.proxy.yaml config --quiet` 检查，再以相同的两个 `-f` 参数执行 `up -d --build`。之后更新、查看状态、停止时也使用相同的两个 `-f` 参数。代理的上游改为 `http://mediary-api:8787`；端口保持容器内部的 8787，无需向公网额外开放。
+手机服务地址是基础地址，不加 `/mcp`；ChatGPT 的 MCP 地址则要加 `/mcp`。创建自定义服务的入口取决于账号和客户端，必须用实际 ChatGPT 账号完成授权和工具调用后才算接入成功。
 
-这是已有代理网络的接入示例，不会替你创建证书或修改现有代理。Caddy、Traefik、面板的具体域名规则沿用你服务器现有方式，超时要覆盖最多约 60 秒的 AI 整理请求。
+## 本机运行与可选 AI 中转
 
-## 手机连接与验收
+本机 Node.js 22 可运行 `npm start`，测试为 `node --test`。启用 MCP 时，除了 HTTPS `PUBLIC_BASE_URL` 和服务口令，还需设置本机私有的绝对 `DATA_DIR`，不能使用仓库受跟踪目录。默认只监听 127.0.0.1；本机代理仍需提供 HTTPS。
 
-1. 打开 **设置 → AI 医嘱整理 → 接口地址、模型与连接方式 → 自有服务（可选）**。
-2. 服务地址填 `https://mediary.example.com`（换成实际地址，不加 `/v1/instructions/parse`）；服务访问口令填 `.env` 中的 `MEDIARY_ACCESS_TOKEN`，点击 **保存 AI 设置**。
-3. 用明确标记为测试的虚构医嘱，核对发送目的地并同意整理。检查返回草稿与原文一致，不保存成实际用药计划；再到智谱控制台核对调用型号和费用。
-4. 断开电脑后复测整理。关闭手机网络后，已有计划和记录仍应可用；锁屏和重启提醒需独立真机验证。
+原 `POST /v1/instructions/parse` 中转保留，Bearer 服务口令鉴权，仅接受 `{ "text": "医嘱原文" }`。可选智谱模式配置 `AI_PROVIDER=zhipu`、`ZHIPU_API_KEY`，固定官方 `glm-4.7-flash`，不回退；可选 Responses 模式配置 `AI_PROVIDER=openai`、`OPENAI_API_KEY`、`OPENAI_MODEL` 和 HTTPS `OPENAI_BASE_URL`。未显式指定提供方的旧 `OPENAI_*` 配置继续兼容。无需这些模型接口时将 Key 留空。
 
-当前服务端只做 AI 中转，尚未实现手机和 PC 的计划/记录同步。开启此模式不会自动上传本机数据库。导入文字会经过自己的服务器并发送到智谱，由你控制的服务端只在本次请求内处理，不写入持久化存储。
+MCP 草稿会持久保存；旧 AI 中转仅在请求内处理，不把整理文本保存为收件箱草稿。两条路径均检查原文证据，手机仍需人工确认。健康检查在 MCP 配置完整时不依赖任何模型 Key；旧中转模式则检查对应模型的本地配置。
 
-## 更新与维护
+## 更新与备份
 
-保存 `.env`，更新源代码后执行 `docker compose up -d --build`。Dockerfile 会先测试，再构建运行镜像。查看启动状态可用 `docker compose ps` 和 `docker compose logs --tail=30 mediary-api`；不要附带导出容器环境。
+更新源码执行 `docker compose up -d --build`。更改 `.env` 后需 `docker compose up -d --force-recreate`，单独 restart 不重新注入环境。更换访问口令会使旧 OAuth 授权失效，手机要更新口令。变更公开基础地址后重新连接 ChatGPT。
 
-修改 `.env` 后执行 `docker compose up -d --force-recreate`；仅 `restart` 不会重新注入环境变量。轮换服务口令后，手机也需要更新口令。停止用 `docker compose down`；服务没有云端服药数据，手机本地历史不受此操作影响。
-
-常见检查：
-
-- 健康检查 503：检查所选提供方的 Key、服务口令长度和服务端配置。
-- 代理 502/504：检查服务状态、代理所在容器/宿主机网络和超时。
-- 整理请求 401：检查手机的服务访问口令；上游 Key 只在服务器填写。
-- 整理请求 429：达到本服务每分钟 10 次、同时 2 次的限制，或智谱平台限流。
-- 返回型号不一致、拒绝、输出截断或原文校验失败：直接报错，手动核对或稍后重试，不会自动改用其他型号。
-
-## 本机运行与兼容模式
-
-不使用 Docker 时需要 Node.js 22。在本目录配置 `.env` 后执行 `npm start`，默认监听 `127.0.0.1:8787`。`node --test` 使用模拟响应，不会消耗真实 API 额度。
-
-保留 Responses API 兼容方式：显式设置 `AI_PROVIDER=openai`，填写 `OPENAI_API_KEY`、`OPENAI_MODEL` 和可选的 `OPENAI_BASE_URL`（必须是 HTTPS Responses 接口）。升级旧配置时，未设置 `AI_PROVIDER` 但已有 `OPENAI_*` 非空配置，会继续使用旧接口；不同提供方不会共享或自动复用密钥。
-
-接口仍是 `POST /v1/instructions/parse`，Bearer 服务口令鉴权，仅接受 `{ "text": "医嘱原文" }`。模型、地址、上游密钥不接受客户端覆盖。两种提供方都经过同一原文证据校验，再返回安卓已有的草稿格式。所有草稿必须经过人工核对才能启用提醒。
+数据卷需要单独备份：先停止本服务，使用受控的服务器本地工具或临时容器归档命名卷，再启动服务，备份限制本机访问。还需保管手机导出的本地计划和服药记录；服务端草稿不能替代手机备份。不要把完整容器环境、Compose 展开配置、数据文件或备份附在公开日志里。
 
 ## GitHub Actions 自动部署
 

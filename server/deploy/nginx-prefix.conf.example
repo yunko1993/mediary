@@ -6,11 +6,23 @@ location = /mediary {
 location /mediary/ {
     proxy_pass http://127.0.0.1:8787/;
     proxy_http_version 1.1;
+    proxy_buffering off;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_connect_timeout 5s;
     proxy_send_timeout 70s;
     proxy_read_timeout 70s;
     client_max_body_size 64k;
+    access_log off;
+}
+
+# OAuth issuer 带 /mediary 路径，RFC 8414 发现会把路径放在 well-known 后方。
+# 只代理本应用的两个精确地址，避免影响同机其他应用。
+location = /.well-known/oauth-authorization-server/mediary {
+    proxy_pass http://127.0.0.1:8787/.well-known/oauth-authorization-server;
+    access_log off;
+}
+location = /.well-known/oauth-protected-resource/mediary/mcp {
+    proxy_pass http://127.0.0.1:8787/.well-known/oauth-protected-resource;
     access_log off;
 }

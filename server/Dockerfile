@@ -10,6 +10,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=8787
 WORKDIR /app
 COPY --from=verify --chown=node:node /app/package.json ./
 COPY --from=verify --chown=node:node /app/src ./src
+RUN mkdir /data && chown node:node /data
 USER node
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

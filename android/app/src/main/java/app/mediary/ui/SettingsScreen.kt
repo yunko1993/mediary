@@ -45,6 +45,10 @@ fun SettingsScreen(model: MediaryViewModel, export: () -> Unit) {
     var hasZhipuKey by remember { mutableStateOf(zhipuKey.isNotBlank()) }
     var advanced by remember { mutableStateOf(mode == ImportMode.RELAY) }
     var error by remember { mutableStateOf<String?>(null) }
+    var mcpEndpoint by remember { mutableStateOf(model.connection.mcpEndpoint) }
+    var mcpToken by remember { mutableStateOf(model.connection.mcpToken) }
+    var mcpError by remember { mutableStateOf<String?>(null) }
+    var optionalApi by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { revision++ }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++; model.refresh() }
     val notifications = remember(revision) { model.app.scheduler.notificationsAllowed() }
@@ -81,6 +85,19 @@ fun SettingsScreen(model: MediaryViewModel, export: () -> Unit) {
             if (BuildConfig.DEBUG) TextButton(onClick = { open(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }) { Text("打开开发者选项") }
             Text("手机关机、应用被强行停止或权限关闭时，提醒可能无法送达。", color = Muted, fontSize = 11.sp)
         } }
+        item { SoftCard {
+            Text("ChatGPT 草稿连接", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Badge("MCP · 无需模型 API Key")
+            Text("ChatGPT 连接你的 Mediary MCP 服务；手机从同一服务领取草稿，核对后才启用提醒。只同步草稿与保存回执，不上传服药历史。", color = Muted, fontSize = 12.sp)
+            OutlinedTextField(mcpEndpoint, { if (it != mcpEndpoint) mcpToken = ""; mcpEndpoint = it; mcpError = null }, label = { Text("Mediary 服务地址") }, placeholder = { Text("https://你的服务/mediary") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(mcpToken, { mcpToken = it; mcpError = null }, label = { Text("服务访问口令") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
+            Text("这是你自己的服务口令，用于手机同步和网页授权；无需填写智谱或 OpenAI Key。口令仅加密保存在本机，不要发送到聊天中。", color = Muted, fontSize = 11.sp)
+            mcpError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+            Button(onClick = { runCatching { model.connection.saveMcp(mcpEndpoint, mcpToken); model.report("草稿连接已保存，可打开收件箱同步") }.onFailure { mcpError = it.message } }) { Text("保存草稿连接") }
+            Text("在 ChatGPT 网页添加自定义 MCP 服务，地址为上方服务地址后加 /mcp，授权方式选 OAuth。具体入口以你的账号为准。", color = Muted, fontSize = 12.sp)
+        } }
+        item { TextButton(onClick = { optionalApi = !optionalApi }) { Text(if (optionalApi) "收起可选 API 整理设置" else "可选：模型 API 直连与整理服务") } }
+        if (optionalApi) {
         item { SoftCard {
             Text("AI 医嘱整理", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Badge(when (mode) { ImportMode.ZHIPU -> "智谱 · GLM-4.7-Flash"; ImportMode.DIRECT -> "其他 API 直连"; ImportMode.RELAY -> "自有整理服务" })
@@ -131,11 +148,12 @@ fun SettingsScreen(model: MediaryViewModel, export: () -> Unit) {
                 model.connection.clearDirectKey(); apiKey = ""; hasSavedKey = false; model.report("本机 API 密钥已清除")
             }) { Text("清除已保存的 API 密钥") }
         } }
+        }
         item { SoftCard {
             Text("我的数据", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Text("计划和历史保存在本机，不自动上传。卸载会清除本机数据，请按需导出。", color = Muted, fontSize = 12.sp)
             OutlinedButton(onClick = export) { Text("导出 JSON 备份") }
         } }
-        item { Text("Mediary 0.1.0 · 用药手记\n你记录的每一次，都有迹可循。", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp)) }
+        item { Text("Mediary 0.2.0 · 用药手记\n你记录的每一次，都有迹可循。", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp)) }
     }
 }

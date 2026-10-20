@@ -19,7 +19,12 @@ import java.net.URI
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ImportSheet(model: MediaryViewModel, onDismiss: () -> Unit, onReview: (ImportDraft) -> Unit) {
+fun ImportSheet(model: MediaryViewModel, onDismiss: () -> Unit, onReview: (ImportDraft, String?) -> Unit, onSettings: () -> Unit) {
+    var apiImport by remember { mutableStateOf(false) }
+    if (!apiImport) {
+        McpInboxSheet(model, onDismiss, onReview, onSettings, onApiImport = { apiImport = true })
+        return
+    }
     var text by remember { mutableStateOf("") }
     var consent by remember { mutableStateOf(false) }
     val state by model.importState.collectAsStateWithLifecycle()
@@ -53,7 +58,7 @@ fun ImportSheet(model: MediaryViewModel, onDismiss: () -> Unit, onReview: (Impor
                 Text("${draft.dose.ifBlank { "剂量待确认" }} · ${draft.frequency.ifBlank { "频次待确认" }}", fontSize = 13.sp)
                 Text("原文：${draft.source}", color = Muted, fontSize = 12.sp)
                 if (draft.missing.isNotEmpty()) Text("待确认：${draft.missing.joinToString("、")}", color = Amber, fontSize = 12.sp)
-                OutlinedButton(onClick = { onReview(draft) }, enabled = !saved) { Text(if (saved) "已保存，可继续核对下一条" else "逐项核对并设置提醒") }
+                OutlinedButton(onClick = { onReview(draft, null) }, enabled = !saved) { Text(if (saved) "已保存，可继续核对下一条" else "逐项核对并设置提醒") }
             } }
             Text("保存计划后才会创建提醒。AI 不会替你增减剂量或处理漏服。", color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(30.dp))

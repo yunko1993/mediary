@@ -2,6 +2,8 @@ import { createServer } from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { ApiError, extract, providerRequest, ZHIPU_BASE_URL, ZHIPU_MODEL } from './extraction.mjs';
+import { Store } from './store.mjs';
+import { mcpRoutes } from './mcp.mjs';
 
 export function configuration(env = process.env) {
   // 显式配置优先；未指定提供方的旧 OpenAI 环境继续使用原接口，避免升级后误切换密钥。
@@ -13,6 +15,8 @@ export function configuration(env = process.env) {
     model: provider === 'zhipu' ? ZHIPU_MODEL : env.OPENAI_MODEL || 'gpt-4.1-mini',
     baseUrl: provider === 'zhipu' ? ZHIPU_BASE_URL : env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
     token: env.MEDIARY_ACCESS_TOKEN ?? '',
+    publicBaseUrl: (env.PUBLIC_BASE_URL ?? '').replace(/\/$/u, ''),
+    dataDir: env.DATA_DIR ?? '',
     host: env.HOST || '127.0.0.1', port: Number(env.PORT || 8787),
   };
 }
@@ -20,7 +24,8 @@ export function configuration(env = process.env) {
 const hash = value => createHash('sha256').update(value).digest();
 const authorized = (header, token) => token.length >= 24 && typeof header === 'string' && timingSafeEqual(hash(header), hash(`Bearer ${token}`));
 
-async function readBody(request) {
+async function readBody(request, form = false) {
+  if (!(request.headers['content-type'] ?? '').toLowerCase().startsWith(form ? 'application/x-www-form-urlencoded' : 'application/json')) throw new ApiError(415, '请求内容类型不匹配');
   let size = 0;
   const chunks = [];
   for await (const chunk of request) {
@@ -28,12 +33,20 @@ async function readBody(request) {
     if (size > 65_536) throw new ApiError(413, '医嘱文本过长，请分段导入');
     chunks.push(chunk);
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  const text = Buffer.concat(chunks).toString('utf8');
+  if (form) return new URLSearchParams(text);
+  try { return JSON.parse(text); }
   catch { throw new ApiError(400, '请求格式应为 JSON'); }
 }
 
 /** 个人使用服务：默认只监听本机，解析需要独立访问口令，不记录医嘱和密钥。 */
 export function createApp(config = configuration(), options = {}) {
+  let mcp;
+  if (config.publicBaseUrl) {
+    const base = new URL(config.publicBaseUrl);
+    if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash || config.token.length < 24 || (!config.dataDir && !options.store)) throw new Error('MCP requires HTTPS PUBLIC_BASE_URL, DATA_DIR and a strong MEDIARY_ACCESS_TOKEN');
+    mcp = mcpRoutes(config, options.store ?? new Store(config.dataDir), readBody);
+  }
   let requests = [];
   let active = 0;
   return createServer({ requestTimeout: 70_000, headersTimeout: 15_000 }, async (request, response) => {
@@ -45,9 +58,10 @@ export function createApp(config = configuration(), options = {}) {
     try {
       if (request.method === 'GET' && request.url === '/health') {
         let ready = config.token.length >= 24;
-        try { providerRequest('', config); } catch { ready = false; }
-        send(ready ? 200 : 503, { status: ready ? 'ok' : 'not_configured', gptConfigured: Boolean(config.apiKey?.trim()), accessConfigured: config.token.length >= 24 }); return;
+        if (!mcp) { try { providerRequest('', config); } catch { ready = false; } }
+        send(ready ? 200 : 503, { status: ready ? 'ok' : 'not_configured', mcpConfigured: Boolean(mcp), gptConfigured: Boolean(config.apiKey?.trim()), accessConfigured: config.token.length >= 24 }); return;
       }
+      if (mcp && await mcp(request, response, new URL(request.url, 'http://localhost'), send)) return;
       if (request.method !== 'POST' || request.url !== '/v1/instructions/parse') throw new ApiError(404, '接口不存在');
       if (!authorized(request.headers.authorization, config.token)) throw new ApiError(401, '服务访问口令无效或尚未配置');
       if (!(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) throw new ApiError(415, '请使用 application/json');

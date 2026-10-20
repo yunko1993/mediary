@@ -26,20 +26,23 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
     val saving = mutableSaving.asStateFlow()
     private val mutableSaveError = MutableStateFlow<String?>(null)
     val saveError = mutableSaveError.asStateFlow()
+    private val mutableInboxSync = MutableStateFlow(InboxSyncState())
+    val inboxSync = mutableInboxSync.asStateFlow()
 
     fun clearMessage() { mutableMessage.value = null }
     fun report(text: String) { mutableMessage.value = text }
 
     fun resetSaveError() { mutableSaveError.value = null }
 
-    fun save(plan: MedicationPlan, success: () -> Unit) {
+    fun save(plan: MedicationPlan, inboxKey: String? = null, success: () -> Unit) {
         if (mutableSaving.value) return
         mutableSaving.value = true
         mutableSaveError.value = null
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { app.repository.save(plan); app.scheduler.reschedule() }
+                withContext(Dispatchers.IO) { app.repository.save(plan, inboxKey); app.scheduler.reschedule() }
                 success(); report("计划已保存")
+                if (inboxKey != null) syncInbox()
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { mutableSaveError.value = error.message ?: "计划未能保存，请重试" }
             finally { mutableSaving.value = false }
@@ -95,6 +98,33 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetImport() { mutableImport.value = ImportState() }
 
+    fun syncInbox() {
+        if (mutableInboxSync.value.busy) return
+        val profile = connection.mcp()
+        mutableInboxSync.value = InboxSyncState(busy = true)
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    // 先补发上次已保存计划的回执，服务离线不影响本地计划与提醒。
+                    app.repository.pendingReceipts(profile.endpoint).chunked(50).forEach { pending ->
+                        McpClient.receipt(profile, pending); app.repository.acknowledgeReceipts(pending)
+                    }
+                    var cursor = 0L
+                    var pages = 0
+                    do {
+                        val page = McpClient.page(profile, cursor)
+                        app.repository.mergeInbox(page.drafts)
+                        McpClient.receipt(profile, page.drafts)
+                        cursor = page.nextCursor ?: 0L
+                        check(++pages <= 100) { "收件箱分页过多，请检查服务" }
+                    } while (cursor != 0L)
+                }
+                mutableInboxSync.value = InboxSyncState(syncedAt = Instant.now())
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutableInboxSync.value = InboxSyncState(error = error.message ?: "同步失败，已下载草稿仍保留在本机") }
+        }
+    }
+
     fun markDraftSaved(draft: ImportDraft) {
         mutableImport.value = mutableImport.value.copy(savedDrafts = mutableImport.value.savedDrafts + draft.key)
     }
@@ -118,3 +148,4 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
 }
 
 data class ImportState(val busy: Boolean = false, val drafts: List<ImportDraft> = emptyList(), val error: String? = null, val completed: Boolean = false, val savedDrafts: Set<String> = emptySet())
+data class InboxSyncState(val busy: Boolean = false, val syncedAt: Instant? = null, val error: String? = null)

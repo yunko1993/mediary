@@ -57,6 +57,7 @@ fun MediaryApp(model: MediaryViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var editor by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<ImportDraft?>(null) }
+    var inboxKey by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf(false) }
     var recordTarget by remember { mutableStateOf<Occurrence?>(null) }
     var now by remember { mutableStateOf(Instant.now()) }
@@ -77,7 +78,7 @@ fun MediaryApp(model: MediaryViewModel) {
                 }
             }
         }, floatingActionButton = {
-            if (tab <= 1) ExtendedFloatingActionButton(onClick = { draft = null; model.resetSaveError(); editor = true }, containerColor = Pine, contentColor = Color.White,
+            if (tab <= 1) ExtendedFloatingActionButton(onClick = { draft = null; inboxKey = null; model.resetSaveError(); editor = true }, containerColor = Pine, contentColor = Color.White,
                 icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("添加计划") })
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
@@ -88,7 +89,7 @@ fun MediaryApp(model: MediaryViewModel) {
                     Spacer(Modifier.width(10.dp))
                     Text("Mediary", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 26.sp, color = Ink)
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { model.resetImport(); importing = true }) { Icon(Icons.Outlined.AutoAwesome, "从医嘱导入", tint = Pine) }
+                    IconButton(onClick = { model.resetImport(); importing = true }) { Icon(Icons.Outlined.AutoAwesome, "ChatGPT 草稿收件箱", tint = Pine) }
                 }
                 if (!reminderReady && tab != 3) TextButton(onClick = { tab = 3 }, modifier = Modifier.padding(horizontal = 20.dp)) {
                     Icon(Icons.Outlined.NotificationsActive, null, Modifier.size(16.dp), tint = Amber)
@@ -97,14 +98,14 @@ fun MediaryApp(model: MediaryViewModel) {
                 if (!snapshot.loaded) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 else when (tab) {
                     0 -> TodayScreen(snapshot, now, { recordTarget = it }, { model.snooze(it) }, { tab = 3 }, { model.resetImport(); importing = true })
-                    1 -> PlansScreen(snapshot, model::toggle, model::recordAsNeeded, { draft = null; model.resetSaveError(); editor = true })
+                    1 -> PlansScreen(snapshot, model::toggle, model::recordAsNeeded, { draft = null; inboxKey = null; model.resetSaveError(); editor = true })
                     2 -> HistoryScreen(snapshot, model::undo) { export.launch("mediary-${LocalDate.now()}.json") }
                     3 -> SettingsScreen(model) { export.launch("mediary-${LocalDate.now()}.json") }
                 }
             }
         }
-        if (importing) ImportSheet(model, onDismiss = { importing = false }, onReview = { selected -> draft = selected; model.resetSaveError(); editor = true })
-        if (editor) PlanEditor(draft = draft, saving = saving, saveError = saveError, onDismiss = { if (!saving) editor = false }, onSave = { plan -> model.save(plan) {
+        if (importing) ImportSheet(model, onDismiss = { importing = false }, onReview = { selected, key -> draft = selected; inboxKey = key; model.resetSaveError(); editor = true }, onSettings = { importing = false; tab = 3 })
+        if (editor) PlanEditor(draft = draft, saving = saving, saveError = saveError, onDismiss = { if (!saving) editor = false }, onSave = { plan -> model.save(plan, inboxKey) {
             draft?.let(model::markDraftSaved)
             editor = false
         } })

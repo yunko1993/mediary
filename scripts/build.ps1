@@ -21,8 +21,8 @@ try {
 } finally { Pop-Location }
 $taskOutputs = Join-Path $taskRoot 'outputs'
 New-Item -ItemType Directory -Path $taskOutputs -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $taskAndroid 'app\build\outputs\apk\debug\app-debug.apk') -Destination (Join-Path $taskOutputs 'mediary-0.1.0-debug.apk') -Force
-$taskDigest = (Get-FileHash -LiteralPath (Join-Path $taskOutputs 'mediary-0.1.0-debug.apk') -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath (Join-Path $taskOutputs 'mediary-0.1.0-debug.apk.sha256') -Value ($taskDigest + '  mediary-0.1.0-debug.apk') -Encoding ascii
+Copy-Item -LiteralPath (Join-Path $taskAndroid 'app\build\outputs\apk\debug\app-debug.apk') -Destination (Join-Path $taskOutputs 'mediary-0.2.0-debug.apk') -Force
+$taskDigest = (Get-FileHash -LiteralPath (Join-Path $taskOutputs 'mediary-0.2.0-debug.apk') -Algorithm SHA256).Hash.ToLowerInvariant()
+Set-Content -LiteralPath (Join-Path $taskOutputs 'mediary-0.2.0-debug.apk.sha256') -Value ($taskDigest + '  mediary-0.2.0-debug.apk') -Encoding ascii
 if (-not $SkipLint) { Copy-Item -LiteralPath (Join-Path $taskAndroid 'app\build\reports\lint-results-debug.html') -Destination (Join-Path $taskOutputs 'lint-results-debug.html') -Force }
-Write-Output ('APK: ' + (Join-Path $taskOutputs 'mediary-0.1.0-debug.apk'))
+Write-Output ('APK: ' + (Join-Path $taskOutputs 'mediary-0.2.0-debug.apk'))

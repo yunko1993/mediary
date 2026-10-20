@@ -50,7 +50,9 @@ export function validateExtraction(value, source) {
         throw new ApiError(502, '解析中出现了原文未明确提供的内容，请重新导入或手动添加');
       }
     }
-    const missing = new Set(item.missing);
+    // 缺失提示也属于不可信模型输出，只保留字段名，不能夹带补服或调整剂量的建议。
+    const allowedMissing = ['药名', '每次剂量', '频次', '疗程', '服用条件', '用药途径', '开始日期', '结束日期', '具体提醒时间'];
+    const missing = new Set(item.missing.filter(text => allowedMissing.includes(text)));
     for (const [key, label] of Object.entries(labels)) if (!item[key].trim()) missing.add(label);
     missing.add('具体提醒时间需人工核对');
     return { ...item, missing: [...missing] };

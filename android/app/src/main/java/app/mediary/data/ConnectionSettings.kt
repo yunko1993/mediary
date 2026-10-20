@@ -24,6 +24,20 @@ class ConnectionSettings(context: Context, preferenceName: String = "connection"
     val endpoint: String get() = preferences.getString("endpoint", "http://127.0.0.1:8787")!!
     val token: String get() = decrypt("token")
     val zhipuKey: String get() = decrypt("zhipuKey", ZhipuFree.endpoint)
+    val mcpEndpoint: String get() = preferences.getString("mcpEndpoint", null) ?: endpoint
+    val mcpToken: String get() = if (preferences.contains("mcpToken")) decrypt("mcpToken", mcpEndpoint) else token
+
+    fun mcp(): GptConnection = GptConnection(ImportMode.RELAY, mcpEndpoint, mcpToken)
+
+    fun saveMcp(endpoint: String, token: String) {
+        val base = endpoint.trim().trimEnd('/')
+        val secret = token.trim()
+        GptConnectionRules.validateEndpoint(base, allowLocalHttp = BuildConfig.DEBUG)
+        GptConnectionRules.validateSecret(secret)
+        require(secret.length >= 24) { "服务访问口令至少需要 24 位" }
+        val encoded = encrypt(secret, base)
+        preferences.edit { putString("mcpEndpoint", base); putString("mcpToken", encoded) }
+    }
 
     fun clearDirectKey() { preferences.edit { remove("apiKey") } }
     fun clearZhipuKey() { preferences.edit { remove("zhipuKey") } }
