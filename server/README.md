@@ -37,11 +37,13 @@ curl --fail http://127.0.0.1:8787/health
 
 ## 接入 HTTPS 与 OAuth 发现
 
-如果以 `/mediary` 前缀接入现有宿主机 Nginx，将 [nginx-prefix.conf.example](deploy/nginx-prefix.conf.example) 放进已有 HTTPS server 块，按实际端口调整，并确保 `PUBLIC_BASE_URL` 精确对应外部地址。模板还提供两个 RFC well-known 发现地址的精确路由；它们对带路径的 OAuth issuer 很重要。
+如果以 `/mediary` 前缀接入现有宿主机 Nginx，将 [nginx-prefix.conf.example](deploy/nginx-prefix.conf.example) 放进已有 HTTPS server 块，按实际端口调整，并确保 `PUBLIC_BASE_URL` 精确对应外部地址。模板包含带路径的 RFC well-known 路由，以及站点根路径发现的兼容别名；已有其他 OAuth issuer 占用根发现路径时，应保留原配置，使用独立域名隔离。
 
 修改代理后先 `sudo nginx -t`，通过才重载。保持 TLS 校验，不记录访问路径中的授权码、请求体或 Authorization。模板关闭本应用访问日志；不要开启请求调试日志。
 
-如果使用独立域名根路径，可设置 `PUBLIC_BASE_URL=https://mediary.example.com`，并把该域名全部请求转发至 `http://127.0.0.1:8787`，保留路径，关闭代理缓冲和访问日志。代理运行在容器内时，应通过专用共享网络访问 `mediary-api:8787`，不能使用代理容器自身的 127.0.0.1。
+如果使用独立域名根路径，可设置 `PUBLIC_BASE_URL=https://mediary.example.com`，使用 [nginx-domain.conf.example](deploy/nginx-domain.conf.example)。先只启用 HTTP 块完成域名验证，证书签发后再启用 HTTPS 块，并配置证书自动续期。该配置保留请求路径，关闭代理缓冲、请求日志和可能包含 OAuth URL 的代理错误日志。代理运行在容器内时，应通过专用共享网络访问 `mediary-api:8787`，不能使用代理容器自身的 127.0.0.1。
+
+出现 `Couldn't discover OAuth settings` 时，先按 [发现故障排查](../docs/mcp.md#oauth-发现故障排查) 验证公网请求和证书；不要通过关闭 OAuth 或 TLS 校验解决。临时隧道示例只用于经确认的诊断，不随主服务启动。
 
 ## 手机和 ChatGPT 接入
 

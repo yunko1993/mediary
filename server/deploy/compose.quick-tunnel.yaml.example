@@ -1,0 +1,25 @@
+# 可选的临时连通诊断；启用前确认能够接受 Cloudflare 终止公网 TLS。
+# 与 server/compose.yaml 合并，不能作为稳定部署入口或自动重启服务。
+services:
+  mediary-tunnel:
+    image: cloudflare/cloudflared:2026.10.1@sha256:a15a3b50b8dabd57ac2090e9484c0247dba9dfa1f0df4d298d4317f9d69eb2d5
+    profiles: [diagnostics]
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --protocol
+      - http2
+      - --edge-ip-version
+      - "4"
+      - --url
+      - http://mediary-api:8787
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    # 错误日志也可能带 OAuth URL。只在启动时附加输出提取公开域名，不保存原始日志。
+    logging:
+      driver: none

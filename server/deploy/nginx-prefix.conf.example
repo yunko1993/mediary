@@ -26,3 +26,13 @@ location = /.well-known/oauth-protected-resource/mediary/mcp {
     proxy_pass http://127.0.0.1:8787/.well-known/oauth-protected-resource;
     access_log off;
 }
+
+# 兼容只从站点根路径开始发现的客户端；已有其他 OAuth issuer 时不要覆盖其根路由。
+location = /.well-known/oauth-authorization-server {
+    proxy_pass http://127.0.0.1:8787/.well-known/oauth-authorization-server;
+    access_log off;
+}
+location = /.well-known/oauth-protected-resource {
+    proxy_pass http://127.0.0.1:8787/.well-known/oauth-protected-resource;
+    access_log off;
+}

@@ -15,6 +15,18 @@ ChatGPT 的自定义服务入口受账号、工作区权限、客户端版本及
 
 当前官方入口说明：[添加自定义 MCP](https://developers.openai.com/api/docs/guides/custom-mcp-server)、[OAuth 要求](https://developers.openai.com/plugins/build/auth)、[连接与测试](https://developers.openai.com/plugins/deploy/connect-chatgpt)。账号与手机客户端可用性需实际验证，不在应用中承诺所有套餐都可用。
 
+## OAuth 发现故障排查
+
+`Couldn't discover OAuth settings` 是发现阶段的通用错误，不足以判断是套餐、地址、证书还是元数据问题。先在公网验证 MCP 未授权请求返回 `401` 和 `WWW-Authenticate`，资源元数据中的 `authorization_servers` 指向授权服务器，再验证授权服务器元数据返回 JSON、issuer 与公开基础地址完全一致。路径前缀部署还需检查站点根路径及带路径的 well-known 入口，参见 Nginx 模板。
+
+标准 SDK 自动发现通过，只能证明该测试环境可以访问和解析。应结合实际 ChatGPT 尝试检查请求是否到达；诊断只记录时间、方法、无查询参数的固定公开路径和状态码，不能保存请求头、请求体、完整 OAuth URL 或客户端地址。局部日志没有请求不能单独证明平台不支持 IP 地址。TLS 必须验证完整信任链和主机名，不能使用自签名证书或跳过校验。
+
+没有自有域名时，可以用免费 DNS 名称进行兼容性验证，但证书仍需验证该名称的控制权。公网验证若被云服务商重定向到拦截页，本机访问正常也无法完成 HTTP-01；应先处理域名入口限制，不能把失败的名称配置进手机。
+
+必要时可使用 [临时隧道 Compose 示例](../server/deploy/compose.quick-tunnel.yaml.example) 对照测试。它不需要 Cloudflare 账号或域名，但会由 Cloudflare 终止公网 TLS：启用真实 OAuth 和草稿流量后，访问口令、OAuth 凭据和医嘱会经过该第三方中转，不能当成仅提供 DNS。应先确认接受这条数据路径，保留原服务与数据卷，并停用原始隧道日志。
+
+Quick Tunnel 的域名随进程重新创建而变化，没有可用性保证，也不支持 SSE；Mediary 的无会话 JSON 传输不使用 SSE。它适合排查，不能替代稳定入口。更换地址时应更新 `PUBLIC_BASE_URL` 并重建应用容器、更新手机连接、重新授权 ChatGPT；仅重启容器不能重新注入环境变量。参见 [Cloudflare 官方说明](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)。
+
 ## 工具与边界
 
 | 工具 | 用途 |
