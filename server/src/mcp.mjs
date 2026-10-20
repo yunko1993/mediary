@@ -33,7 +33,8 @@ export function mcpRoutes(config, store, readBody) {
     if (path === '/oauth/authorize') {
       if (request.method === 'GET') {
         const form = oauth.form(url.searchParams);
-        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': form.cookie, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
+        // no-referrer 会让浏览器表单发送 Origin:null；same-origin 保留本站来源，跨站仍不发送 Referer。
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': form.cookie, 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin',
           'Content-Security-Policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff' });
         response.end(form.html); return true;
       }

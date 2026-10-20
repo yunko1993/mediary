@@ -37,14 +37,22 @@ async function authorize(url, scope = 'drafts:read drafts:write offline_access')
   const page = await fetch(`${url}/oauth/authorize?${query}`);
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/u);
+  assert.equal(page.headers.get('referrer-policy'), 'same-origin');
   const html = await page.text();
   const ticket = /name="ticket" value="([^"]+)"/u.exec(html)[1];
   const csrf = /name="csrf" value="([^"]+)"/u.exec(html)[1];
   const cookie = page.headers.get('set-cookie').split(';')[0];
+  // 浏览器表单必须保留同源 Origin；空来源和外站即使拿到表单字段，也不能越过来源校验。
+  for (const origin of ['null', 'https://attacker.example']) {
+    const blocked = await fetch(`${url}/oauth/authorize`, { method: 'POST', redirect: 'manual',
+      headers: { ...formHeaders, Cookie: cookie, Origin: origin }, body: new URLSearchParams({ ticket, csrf, password: owner }) });
+    assert.equal(blocked.status, 403);
+  }
   const missingCsrf = await fetch(`${url}/oauth/authorize`, { method: 'POST', redirect: 'manual', headers: formHeaders, body: new URLSearchParams({ ticket, csrf, password: owner }) });
   assert.equal(missingCsrf.status, 400);
-  const response = await fetch(`${url}/oauth/authorize`, { method: 'POST', redirect: 'manual', headers: { ...formHeaders, Cookie: cookie }, body: new URLSearchParams({ ticket, csrf, password: owner }) });
+  const response = await fetch(`${url}/oauth/authorize`, { method: 'POST', redirect: 'manual', headers: { ...formHeaders, Cookie: cookie, Origin: new URL(resource).origin }, body: new URLSearchParams({ ticket, csrf, password: owner }) });
   assert.equal(response.status, 303);
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
   const redirect = new URL(response.headers.get('location'));
   assert.equal(redirect.searchParams.get('state'), 'csrf-state');
   assert.equal(redirect.searchParams.get('iss'), resource.slice(0, -4));
