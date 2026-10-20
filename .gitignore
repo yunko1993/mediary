@@ -1,0 +1,17 @@
+/.gradle/
+**/.gradle/
+**/.kotlin/
+**/build/
+**/local.properties
+/.idea/
+*.iml
+/work/
+/outputs/
+**/.env*
+!**/.env.example
+**/node_modules/
+*.keystore
+*.jks
+*.pem
+*.key
+.DS_Store

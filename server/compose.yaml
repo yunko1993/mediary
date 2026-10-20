@@ -1,0 +1,26 @@
+name: mediary
+services:
+  mediary-api:
+    build: .
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8787"
+    ports:
+      - "127.0.0.1:${MEDIARY_PORT:-8787}:8787"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 70s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
