@@ -116,6 +116,13 @@ test('only the phone can acknowledge drafts; repeated receipts preserve review t
   const page = await (await fetch(`${url}/v1/drafts?after=0&limit=20`, { headers: { Authorization: `Bearer ${owner}` } })).json(); assert.equal(page.drafts[0].status, 'reviewed_on_device');
 }));
 
+test('an empty phone inbox still acknowledges a successful sync without creating medical data', async () => service(async (url, store) => {
+  const response = await fetch(`${url}/v1/drafts/receipts`, { method: 'POST', headers: { ...headers, Authorization: `Bearer ${owner}` }, body: JSON.stringify({ receipts: [] }) });
+  assert.equal(response.status, 200);
+  assert.ok(store.status().lastDeviceSyncAt);
+  assert.equal(store.state.drafts.length, 0);
+}));
+
 test('read-only OAuth cannot create drafts; refresh rotates credentials; revocation and owner rotation invalidate grants', async () => service(async (url, store, config) => {
   const read = await authorize(url, 'drafts:read offline_access');
   assert.equal((await rpc(url, read.access_token, 'tools/call', { name: 'create_medication_draft', arguments: draft })).status, 403);

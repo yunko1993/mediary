@@ -83,7 +83,7 @@ export class Store {
 
   /** 只接受手机凭据回执；MCP OAuth 令牌没有此权限，也不代表通知一定送达。 */
   receive(receipts) {
-    if (!Array.isArray(receipts) || !receipts.length || receipts.length > 50 || receipts.some(item => !item ||
+    if (!Array.isArray(receipts) || receipts.length > 50 || receipts.some(item => !item ||
         Object.keys(item).some(key => !['id', 'planId'].includes(key)) || typeof item.id !== 'string' ||
         (item.planId !== undefined && (typeof item.planId !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/u.test(item.planId))))) throw new ApiError(400, '手机回执格式无效');
     return this.change(state => {

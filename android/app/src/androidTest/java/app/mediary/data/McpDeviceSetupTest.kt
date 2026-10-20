@@ -16,6 +16,11 @@ class McpDeviceSetupTest {
             require(file.length() in 1..8192) { "Private device configuration file is missing or oversized" }
             val config = JSONObject(file.readText())
             ConnectionSettings(context).saveMcp(config.getString("endpoint"), config.getString("token"))
+            if (InstrumentationRegistry.getArguments().getString("verifyMcp") == "true") {
+                val profile = ConnectionSettings(context).mcp()
+                McpClient.page(profile, 0)
+                McpClient.receipt(profile, emptyList())
+            }
         } finally { file.delete() }
     }
 }

@@ -50,7 +50,7 @@ object McpClient {
         request(profile, "/v1/drafts?after=$after&limit=20"), profile.endpoint, after)
 
     fun receipt(profile: GptConnection, drafts: List<InboxDraft>) {
-        if (drafts.isEmpty()) return
+        // 空列表也是手机完成同步的回执，不能让空收件箱一直显示为未连接。
         require(drafts.size <= 50 && drafts.all { it.account == profile.endpoint }) { "草稿所属服务不匹配，请核对连接设置" }
         val items = JSONArray(drafts.map { draft -> JSONObject().put("id", draft.id).apply { draft.localPlanId?.let { put("planId", it) } } })
         request(profile, "/v1/drafts/receipts", JSONObject().put("receipts", items))
