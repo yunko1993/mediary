@@ -17,7 +17,7 @@ ChatGPT 的自定义服务入口受账号、工作区权限、客户端版本及
 
 ## OAuth 发现故障排查
 
-`Couldn't discover OAuth settings` 是发现阶段的通用错误，不足以判断是套餐、地址、证书还是元数据问题。先在公网验证 MCP 未授权请求返回 `401` 和 `WWW-Authenticate`，资源元数据中的 `authorization_servers` 指向授权服务器，再验证授权服务器元数据返回 JSON、issuer 与公开基础地址完全一致。路径前缀部署还需检查站点根路径及带路径的 well-known 入口，参见 Nginx 模板。
+`Couldn't discover OAuth settings` 是发现阶段的通用错误，不足以判断是套餐、地址、证书还是元数据问题。先在公网验证匿名 `GET /mcp` 返回 `401` 和 `WWW-Authenticate`，资源元数据中的 `authorization_servers` 指向授权服务器，再验证授权服务器元数据返回 JSON、issuer 与公开基础地址完全一致。路径前缀部署还需检查站点根路径及带路径的 well-known 入口，参见 Nginx 模板。
 
 标准 SDK 自动发现通过，只能证明该测试环境可以访问和解析。应结合实际 ChatGPT 尝试检查请求是否到达；诊断只记录时间、方法、无查询参数的固定公开路径和状态码，不能保存请求头、请求体、完整 OAuth URL 或客户端地址。局部日志没有请求不能单独证明平台不支持 IP 地址。TLS 必须验证完整信任链和主机名，不能使用自签名证书或跳过校验。
 
@@ -45,7 +45,7 @@ Quick Tunnel 的域名随进程重新创建而变化，没有可用性保证，�
 
 ## 授权与存储
 
-MCP 使用无会话 Streamable HTTP，可协商 `2025-03-26` / `2025-06-18`，POST 返回 JSON，GET 返回 405。支持 `initialize`、`ping`、`tools/list`、`tools/call` 与通知，不提供旧版 SSE 长连接。所有 MCP 数据请求必须携带 OAuth 令牌；手机 REST 只接受服务访问口令，OAuth 令牌不能伪造手机确认。
+MCP 使用无会话 Streamable HTTP，可协商 `2025-03-26` / `2025-06-18`，POST 返回 JSON；GET 未授权返回 401，有有效令牌时返回 405。支持 `initialize`、`ping`、`tools/list`、`tools/call` 与通知，不提供旧版 SSE 长连接。初始化和工具目录只暴露公开协议资料，可匿名访问；四个工具均声明 OAuth，调用时仍验证令牌、权限和资源绑定。未授权、令牌过期或权限不足时返回 `isError` 与 `_meta["mcp/www_authenticate"]`，包含资源元数据地址、所需 scope、error 和 error_description，让 ChatGPT 能在聊天中触发连接界面；拒绝时不读取状态或读写草稿。手机 REST 只接受服务访问口令，OAuth 令牌不能伪造手机确认。
 
 OAuth 支持 DCR、授权码 + S256 PKCE、resource audience、scope、一次性授权码、刷新令牌轮换与撤销。access token 默认 1 小时，申请 `offline_access` 后 refresh token 最长 30 天。授权页带 CSRF、短期一次性表单及防嵌套策略。当前只允许 `https://chatgpt.com/connector_platform_oauth_redirect` 和 `https://chatgpt.com/connector/oauth/<callback_id>` 两类精确格式回调。客户端注册只接受 public client (`none`)，不支持 CIMD 或第三方登录账号。
 

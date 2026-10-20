@@ -51,7 +51,7 @@ curl --fail http://127.0.0.1:8787/health
 
 | 路径 | 权限与用途 |
 | --- | --- |
-| `POST /mcp` | OAuth，JSON-RPC 工具调用；无匿名医疗数据访问 |
+| `POST /mcp` | 初始化和工具目录可匿名读取；所有工具调用验证 OAuth，未授权返回聊天登录挑战，无匿名医疗数据访问 |
 | `GET /.well-known/oauth-protected-resource` | 公开资源元数据 |
 | `GET /.well-known/oauth-authorization-server` | 公开授权服务器元数据 |
 | `/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` | DCR、授权码 + PKCE、刷新及撤销 |

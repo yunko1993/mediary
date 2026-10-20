@@ -17,6 +17,18 @@ const headers = { 'Content-Type': 'application/json', Accept: 'application/json,
 const formHeaders = { 'Content-Type': 'application/x-www-form-urlencoded' };
 const rpc = (url, token, method, params = {}, extra = {}) => fetch(`${url}/mcp`, { method: 'POST', headers: { ...headers, Authorization: `Bearer ${token}`, ...extra }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
 
+async function needsOAuth(response, error = 'invalid_token', scope = 'drafts:read') {
+  assert.equal(response.status, 200);
+  const { result } = await response.json();
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent, undefined);
+  const challenge = result._meta['mcp/www_authenticate'][0];
+  assert.ok(challenge.includes(`error="${error}"`));
+  assert.ok(challenge.includes(`scope="${scope}"`));
+  assert.ok(challenge.includes('error_description="'));
+  assert.ok(challenge.includes('resource_metadata="https://mediary.example.invalid/mediary/.well-known/oauth-protected-resource"'));
+}
+
 async function service(callback) {
   const directory = mkdtempSync(join(tmpdir(), 'mediary-mcp-'));
   const store = new Store(directory);
@@ -68,12 +80,30 @@ async function authorize(url, scope = 'drafts:read drafts:write offline_access')
 
 test('MCP-only health and discovery work without an AI key; medical data requires OAuth', async () => service(async url => {
   const health = await fetch(`${url}/health`); assert.equal(health.status, 200); assert.equal((await health.json()).gptConfigured, false);
-  const blocked = await rpc(url, 'wrong', 'tools/list'); assert.equal(blocked.status, 401);
+  const blocked = await fetch(`${url}/mcp`); assert.equal(blocked.status, 401);
   assert.match(blocked.headers.get('www-authenticate'), /oauth-protected-resource/u);
-  assert.equal((await rpc(url, owner, 'tools/list')).status, 401);
+  await needsOAuth(await rpc(url, owner, 'tools/call', { name: 'get_sync_status' }));
   const metadata = await (await fetch(`${url}/.well-known/oauth-authorization-server`)).json();
   assert.deepEqual(metadata.code_challenge_methods_supported, ['S256']); assert.ok(metadata.scopes_supported.includes('offline_access'));
   assert.equal((await (await fetch(`${url}/.well-known/oauth-protected-resource`)).json()).resource, resource);
+}));
+
+test('anonymous clients discover OAuth tools and receive login challenges without reading or creating data', async () => service(async (url, store) => {
+  const anonymous = (method, params = {}) => fetch(`${url}/mcp`, { method: 'POST', headers,
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const init = await anonymous('initialize', { protocolVersion: '2025-06-18' });
+  assert.equal(init.status, 200); assert.equal((await init.json()).result.serverInfo.name, 'mediary');
+  const listed = (await (await anonymous('tools/list')).json()).result.tools;
+  assert.equal(listed.length, 4);
+  for (const tool of listed) {
+    assert.equal(tool.securitySchemes[0].type, 'oauth2');
+    assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
+    const args = tool.name === 'create_medication_draft' ? draft : tool.name === 'get_medication_draft' ? { id: '00000000-0000-4000-8000-000000000000' } : {};
+    await needsOAuth(await anonymous('tools/call', { name: tool.name, arguments: args }), 'invalid_token',
+      tool.name === 'create_medication_draft' ? 'drafts:write' : 'drafts:read');
+  }
+  assert.equal(store.state.drafts.length, 0);
+  assert.equal(store.state.lastDeviceSyncAt, null);
 }));
 
 test('OAuth and Streamable HTTP support initialization, tools, notifications and method errors', async () => service(async url => {
@@ -133,17 +163,18 @@ test('an empty phone inbox still acknowledges a successful sync without creating
 
 test('read-only OAuth cannot create drafts; refresh rotates credentials; revocation and owner rotation invalidate grants', async () => service(async (url, store, config) => {
   const read = await authorize(url, 'drafts:read offline_access');
-  assert.equal((await rpc(url, read.access_token, 'tools/call', { name: 'create_medication_draft', arguments: draft })).status, 403);
+  await needsOAuth(await rpc(url, read.access_token, 'tools/call', { name: 'create_medication_draft', arguments: draft }), 'insufficient_scope', 'drafts:write');
+  assert.equal(store.state.drafts.length, 0);
   const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: read.client.client_id, refresh_token: read.refresh_token, resource });
   const response = await fetch(`${url}/oauth/token`, { method: 'POST', headers: formHeaders, body }); assert.equal(response.status, 200);
   const rotated = await response.json(); assert.notEqual(rotated.refresh_token, read.refresh_token);
   assert.equal((await fetch(`${url}/oauth/token`, { method: 'POST', headers: formHeaders, body })).status, 400);
-  assert.equal((await rpc(url, read.access_token, 'tools/list')).status, 401);
+  await needsOAuth(await rpc(url, read.access_token, 'tools/call', { name: 'get_sync_status' }));
   const grant = store.state.grants.find(item => item.clientId === read.client.client_id); grant.accessExpires = 0;
-  assert.equal((await rpc(url, rotated.access_token, 'tools/list')).status, 401); grant.accessExpires = Date.now() + 60000;
-  config.token = 'rotated-owner-token-for-tests-only-12345'; assert.equal((await rpc(url, rotated.access_token, 'tools/list')).status, 401); config.token = owner;
+  await needsOAuth(await rpc(url, rotated.access_token, 'tools/call', { name: 'get_sync_status' })); grant.accessExpires = Date.now() + 60000;
+  config.token = 'rotated-owner-token-for-tests-only-12345'; await needsOAuth(await rpc(url, rotated.access_token, 'tools/call', { name: 'get_sync_status' })); config.token = owner;
   await fetch(`${url}/oauth/revoke`, { method: 'POST', headers: formHeaders, body: new URLSearchParams({ token: rotated.refresh_token, client_id: read.client.client_id }) });
-  assert.equal((await rpc(url, rotated.access_token, 'tools/list')).status, 401);
+  await needsOAuth(await rpc(url, rotated.access_token, 'tools/call', { name: 'get_sync_status' }));
 }));
 
 test('OAuth rejects redirect substitution, missing CSRF, bad PKCE, wrong audience and reused codes', async () => service(async url => {

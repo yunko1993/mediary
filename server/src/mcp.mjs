@@ -60,11 +60,13 @@ export function mcpRoutes(config, store, readBody) {
     }
     if (path === '/mcp') {
       const challenge = `Bearer resource_metadata="${config.publicBaseUrl}/.well-known/oauth-protected-resource", scope="drafts:read drafts:write"`;
-      if (!oauth.access(request.headers.authorization, 'drafts:read') && !oauth.access(request.headers.authorization, 'drafts:write')) {
-        response.setHeader('WWW-Authenticate', challenge); throw new ApiError(401, '请先通过 OAuth 授权 Mediary');
-      }
       const version = request.headers['mcp-protocol-version'];
-      if (request.method !== 'POST') { response.setHeader('Allow', 'POST'); throw new ApiError(405, '本服务使用无会话的 Streamable HTTP JSON 响应'); }
+      if (request.method !== 'POST') {
+        if (!oauth.access(request.headers.authorization, 'drafts:read') && !oauth.access(request.headers.authorization, 'drafts:write')) {
+          response.setHeader('WWW-Authenticate', challenge); throw new ApiError(401, '请先通过 OAuth 授权 Mediary');
+        }
+        response.setHeader('Allow', 'POST'); throw new ApiError(405, '本服务使用无会话的 Streamable HTTP JSON 响应');
+      }
       const accept = request.headers.accept ?? '';
       if (!accept.includes('application/json') || !accept.includes('text/event-stream')) throw new ApiError(406, 'Accept 需要包含 application/json 和 text/event-stream');
       const body = await readBody(request);
@@ -79,6 +81,7 @@ export function mcpRoutes(config, store, readBody) {
         if (!body.method.startsWith('notifications/')) { send(400, { error: '通知方法无效' }); return true; }
         response.writeHead(202); response.end(); return true;
       }
+      // 初始化与工具目录只包含公开协议资料；客户端先发现 OAuth 策略，才能在调用时引导登录。
       if (body.method === 'initialize') {
         result({ protocolVersion: ['2025-03-26', '2025-06-18'].includes(body.params?.protocolVersion) ? body.params.protocolVersion : '2025-06-18', capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'mediary', version: '0.2.0' }, instructions: `${instructions}\n使用本服务仅保存待核对草稿，不能启用提醒、查询或修改手机服药历史。` }); return true;
@@ -89,7 +92,15 @@ export function mcpRoutes(config, store, readBody) {
       const name = body.params?.name;
       if (!names.includes(name)) { fail(-32602, '工具不存在'); return true; }
       const needed = name === names[0] ? 'drafts:write' : 'drafts:read';
-      if (!oauth.access(request.headers.authorization, needed)) { response.setHeader('WWW-Authenticate', challenge); throw new ApiError(403, '此连接未获准执行该操作'); }
+      if (!oauth.access(request.headers.authorization, needed)) {
+        const hasGrant = oauth.access(request.headers.authorization, 'drafts:read') || oauth.access(request.headers.authorization, 'drafts:write');
+        const authChallenge = `Bearer resource_metadata="${config.publicBaseUrl}/.well-known/oauth-protected-resource", scope="${needed}", error="${hasGrant ? 'insufficient_scope' : 'invalid_token'}", error_description="Connect Mediary to authorize this tool"`;
+        // ChatGPT 需要工具结果中的标准挑战才能弹出连接入口；拒绝时不读取状态，也不写入草稿。
+        response.setHeader('WWW-Authenticate', authChallenge);
+        result({ isError: true, content: [{ type: 'text', text: '请先连接并授权 Mediary；此次没有读取或保存用药数据。' }],
+          _meta: { 'mcp/www_authenticate': [authChallenge] } });
+        return true;
+      }
       try {
         const args = body.params.arguments ?? {};
         if (!args || typeof args !== 'object' || Array.isArray(args)) throw new ApiError(400, '工具参数格式无效');
