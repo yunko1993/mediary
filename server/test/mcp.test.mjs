@@ -29,11 +29,11 @@ async function needsOAuth(response, error = 'invalid_token', scope = 'drafts:rea
   assert.ok(challenge.includes('resource_metadata="https://mediary.example.invalid/mediary/.well-known/oauth-protected-resource"'));
 }
 
-async function service(callback) {
+async function service(callback, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'mediary-mcp-'));
   const store = new Store(directory);
   const config = { token: owner, publicBaseUrl: resource.slice(0, -4), dataDir: directory, apiKey: '' };
-  const app = createApp(config, { store, fetchImpl: () => { throw new Error('MCP must never call model APIs'); } });
+  const app = createApp(config, { store, fetchImpl: () => { throw new Error('MCP must never call model APIs'); }, ...options });
   app.listen(0, '127.0.0.1'); await once(app, 'listening');
   try { await callback(`http://127.0.0.1:${app.address().port}`, store, config); }
   finally { app.closeAllConnections(); await new Promise(resolve => app.close(resolve)); rmSync(directory, { recursive: true }); }
@@ -105,6 +105,30 @@ test('anonymous clients discover OAuth tools and receive login challenges withou
   assert.equal(store.state.drafts.length, 0);
   assert.equal(store.state.lastDeviceSyncAt, null);
 }));
+
+test('opt-in diagnostics distinguish tool discovery, linking and successful calls without recording credentials or medical data', async () => {
+  const events = [];
+  await service(async (url, store) => {
+    await (await rpc(url, owner, 'tools/list')).json();
+    await needsOAuth(await rpc(url, owner, 'tools/call', { name: 'create_medication_draft', arguments: draft }), 'invalid_token', 'drafts:write');
+    const auth = await authorize(url);
+    const status = await rpc(url, auth.access_token, 'tools/call', { name: 'get_sync_status' });
+    assert.equal(status.status, 200); assert.equal((await status.json()).result.isError, undefined);
+    await (await rpc(url, auth.access_token, 'private-rpc-sentinel')).json();
+    assert.ok(events.some(event => event.operation === 'tools_list' && event.outcome === 'success'));
+    assert.ok(events.some(event => event.operation === 'tool_create_medication_draft' && event.outcome === 'auth_required'));
+    assert.ok(events.some(event => event.route === 'authorize' && event.method === 'POST' && event.status === 303));
+    assert.ok(events.some(event => event.route === 'token' && event.status === 200));
+    assert.ok(events.some(event => event.operation === 'tool_get_sync_status' && event.outcome === 'success'));
+    assert.ok(events.some(event => event.operation === 'rpc_other' && event.outcome === 'rpc_error'));
+    const serialized = JSON.stringify(events);
+    for (const secret of [owner, sourceText, 'private-rpc-sentinel', auth.access_token, auth.refresh_token,
+      auth.client.client_id, auth.tokenBody.get('code'), auth.page.csrf, auth.page.ticket]) {
+      assert.equal(serialized.includes(secret), false);
+    }
+    assert.equal(store.state.drafts.length, 0);
+  }, { diagnosticSink: event => events.push(event) });
+});
 
 test('OAuth and Streamable HTTP support initialization, tools, notifications and method errors', async () => service(async url => {
   const auth = await authorize(url);

@@ -1,5 +1,6 @@
 import { ApiError, extractionSchema, instructions } from './extraction.mjs';
 import { OAuth, secretEquals } from './oauth.mjs';
+import { observeMcpRequest } from './diagnostics.mjs';
 
 const objectSchema = properties => ({ type: 'object', additionalProperties: false, properties });
 const pageSchema = objectSchema({ after: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 50 } });
@@ -16,12 +17,13 @@ const tools = [
 });
 
 /** MCP 与手机 REST 共用收件箱，OAuth 权限不能越界到手机确认接口。 */
-export function mcpRoutes(config, store, readBody) {
+export function mcpRoutes(config, store, readBody, diagnosticSink) {
   const oauth = new OAuth(config, store);
   let traffic = [];
   return async (request, response, url, send) => {
     const path = url.pathname;
     if (!['/mcp', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke', '/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource', '/v1/drafts', '/v1/drafts/receipts'].includes(path)) return false;
+    const diagnostic = observeMcpRequest(request, response, path, diagnosticSink);
     const origin = request.headers.origin;
     if (origin && ![new URL(config.publicBaseUrl).origin, 'https://chatgpt.com'].includes(origin)) throw new ApiError(403, '请求来源不被允许');
     traffic = traffic.filter(time => Date.now() - time < 60_000);
@@ -74,9 +76,10 @@ export function mcpRoutes(config, store, readBody) {
       if (!body || Array.isArray(body) || body.jsonrpc !== '2.0' || typeof body.method !== 'string' || !validId) {
         send(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: '无效 JSON-RPC 请求；不支持批处理' } }); return true;
       }
+      diagnostic.rpc(body.method, body.params?.name);
       if (body.method !== 'initialize' && version && !['2025-03-26', '2025-06-18'].includes(version)) throw new ApiError(400, '不支持此 MCP 协议版本，请重新初始化');
-      const fail = (code, message) => send(200, { jsonrpc: '2.0', id: body.id, error: { code, message } });
-      const result = value => send(200, { jsonrpc: '2.0', id: body.id, result: value });
+      const fail = (code, message) => { diagnostic.rpcError(); send(200, { jsonrpc: '2.0', id: body.id, error: { code, message } }); };
+      const result = value => { diagnostic.result(value); send(200, { jsonrpc: '2.0', id: body.id, result: value }); };
       if (body.id === undefined) {
         if (!body.method.startsWith('notifications/')) { send(400, { error: '通知方法无效' }); return true; }
         response.writeHead(202); response.end(); return true;

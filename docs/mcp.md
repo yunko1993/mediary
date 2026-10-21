@@ -29,6 +29,8 @@ Quick Tunnel 的域名随进程重新创建而变化，没有可用性保证，�
 
 ## 工具与边界
 
+如果 ChatGPT 回复“当前工具列表中没有找到 get_sync_status”，这不是接口返回的错误，不能据此判断口令无效。先在 Plugins 的 Mediary 详情页核对 MCP 地址是否指向当前部署的 `/mcp`，选择 Refresh／刷新，并检查下面四个工具均已发现、需要的工具已启用，再开新对话通过 `@` 选择该连接。安装了旧地址或同名连接时，应按地址辨认；刷新工具信息不需要删除手机数据。若刷新报错，保留具体错误，先排查发现阶段，不反复更改 OAuth 逻辑。参见 [官方刷新流程](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata)。
+
 | 工具 | 用途 |
 | --- | --- |
 | `create_medication_draft` | 保存一种药物的待核对草稿，必须带原文、逐字段引文和幂等 requestId |

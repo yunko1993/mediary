@@ -17,6 +17,7 @@ export function configuration(env = process.env) {
     token: env.MEDIARY_ACCESS_TOKEN ?? '',
     publicBaseUrl: (env.PUBLIC_BASE_URL ?? '').replace(/\/$/u, ''),
     dataDir: env.DATA_DIR ?? '',
+    mcpDiagnostics: env.MCP_DIAGNOSTICS === '1',
     host: env.HOST || '127.0.0.1', port: Number(env.PORT || 8787),
   };
 }
@@ -45,7 +46,8 @@ export function createApp(config = configuration(), options = {}) {
   if (config.publicBaseUrl) {
     const base = new URL(config.publicBaseUrl);
     if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash || config.token.length < 24 || (!config.dataDir && !options.store)) throw new Error('MCP requires HTTPS PUBLIC_BASE_URL, DATA_DIR and a strong MEDIARY_ACCESS_TOKEN');
-    mcp = mcpRoutes(config, options.store ?? new Store(config.dataDir), readBody);
+    const diagnosticSink = options.diagnosticSink ?? (config.mcpDiagnostics ? event => console.log(JSON.stringify(event)) : undefined);
+    mcp = mcpRoutes(config, options.store ?? new Store(config.dataDir), readBody, diagnosticSink);
   }
   let requests = [];
   let active = 0;

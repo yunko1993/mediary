@@ -45,6 +45,8 @@ curl --fail http://127.0.0.1:8787/health
 
 出现 `Couldn't discover OAuth settings` 时，先按 [发现故障排查](../docs/mcp.md#oauth-发现故障排查) 验证公网请求和证书；不要通过关闭 OAuth 或 TLS 校验解决。临时隧道示例只用于经确认的诊断，不随主服务启动。
 
+发现或授权卡住时，可临时设置 `MCP_DIAGNOSTICS=1` 并重建 API 容器。默认关闭；启用后，标准输出中的 `mediary_mcp_diagnostic` 事件只包含服务器时间、固定路由标签、固定 HTTP/RPC 阶段、结果类型和状态码，不记录 URL、查询参数、请求头、正文、客户端地址、错误正文或凭据。`tools_list / success` 表示服务器已返回工具目录，`auth_required` 表示工具正在要求登录，`authorize / POST / 303` 与 `token / 200` 可区分表单完成和令牌兑换；这些仍不等于 ChatGPT 已把工具加载进聊天。排查后设回 `0` 并重建 API 容器。不要因此开启代理或隧道的原始访问日志。
+
 ## 手机和 ChatGPT 接入
 
 见 [MCP 接入说明](../docs/mcp.md)。主要接口：
