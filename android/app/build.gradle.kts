@@ -11,8 +11,8 @@ android {
         applicationId = "app.mediary"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -22,7 +22,17 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildTypes {
-        release { isMinifyEnabled = false }
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "Mediary Dev")
+        }
+        release {
+            isMinifyEnabled = false
+            isDebuggable = false
+            resValue("string", "app_name", "Mediary")
+            // 先生成未签名 APK，再由发布脚本验证版本并使用签名迁移链签署。
+        }
     }
 }
 

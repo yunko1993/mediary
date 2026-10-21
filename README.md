@@ -16,6 +16,12 @@
 
 应用不附带真实药物示例，不自动创建任何服药计划。当前支持草稿同步，暂不支持服药历史云同步、照片识别、PC 客户端和备份文件一键恢复。
 
+## 下载到手机
+
+打开 [最新 GitHub Release](https://github.com/yunko1993/mediary/releases/latest)，下载 Assets 中的 **mediary.apk**，在手机点击安装即可。也可使用 [最新 APK 固定下载地址](https://github.com/yunko1993/mediary/releases/latest/download/mediary.apk)。不需要一直连接 USB；更新时覆盖安装，不要先卸载。安装包不包含个人服务口令，首次使用仍须配置自己的草稿连接。
+
+正式版关闭调试功能，固定签名并包含旧版签名迁移证明；开发版单独显示为 **Mediary Dev**，使用独立数据。签名备份、构建和后续自动发布见 [发行说明](docs/releases.md)。
+
 ## 工程结构
 
 ```text
@@ -45,11 +51,11 @@ Set-Location android
 .\gradlew.bat :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-`scripts/build.ps1` 可在仓库根目录执行相同检查，并将 APK 放入 `outputs/mediary-0.2.2-debug.apk`。如果本机使用自动准备的工具，SDK 位于 `work/tools/android-sdk`，Gradle 缓存在 `work/gradle-home`。这些本机依赖不提交 Git。
+`scripts/build.ps1` 可在仓库根目录执行相同检查，并将开发 APK 按实际版本放入 `outputs/`。使用 `-Variant Release` 和私有签名配置可构建正式包 `outputs/release/mediary.apk`。如果本机使用自动准备的工具，SDK 位于 `work/tools/android-sdk`，Gradle 缓存在 `work/gradle-home`。这些本机依赖不提交 Git。
 
-APK 为开发调试包，适合自用验证。最低 Android 8.0（API 26），目标 API 35。
+开发调试包只用于开发验证；日常使用请下载 Release 正式包。最低 Android 8.0（API 26），目标 API 35。
 
-连接一部已授权 USB 调试的手机后，可以在仓库根目录运行 `./scripts/install.ps1` 安装并打开应用。多部手机时使用 `-Serial <设备ID>` 指定。手机直连 GPT 不需要 USB；仅在调试可选本机整理服务时使用 `-ConnectGptService` 设置 USB 反向连接。
+连接一部已授权 USB 调试的手机后，可以在仓库根目录运行 `./scripts/install.ps1` 安装并打开正式包；独立开发版使用 `-Variant Debug`。多部手机时使用 `-Serial <设备ID>` 指定。手机直连 GPT 不需要 USB；仅在调试可选本机整理服务时使用 `-Variant Debug -ConnectGptService` 设置 USB 反向连接。
 
 如果开发者选项的厂商菜单入口不可见，可以先通过文件传输将 APK 复制到手机安装，再在 Mediary 的 **设置 → 打开开发者选项** 中跳转系统页面。这个快捷入口仅在开发调试包显示，不会自动改变系统开关。
 
