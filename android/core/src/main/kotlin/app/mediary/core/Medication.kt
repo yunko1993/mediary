@@ -9,6 +9,18 @@ import java.util.UUID
 enum class ScheduleKind { DAILY, INTERVAL, AS_NEEDED }
 enum class DoseAction { TAKEN, SKIPPED, UNDONE }
 
+data class MedicationPerson(val id: String = UUID.randomUUID().toString(), val name: String) {
+    fun validate(): MedicationPerson {
+        require(id == SELF_ID || runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)) { "用药人标识无效" }
+        require(name.isNotBlank() && name == name.trim() && name.length <= 24 && name.none { it.isISOControl() }) { "请填写 1–24 字的用药人称呼" }
+        return this
+    }
+    companion object {
+        const val SELF_ID = "self"
+        fun self() = MedicationPerson(SELF_ID, "我")
+    }
+}
+
 data class MedicationPlan(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -22,8 +34,11 @@ data class MedicationPlan(
     val start: LocalDate,
     val end: LocalDate? = null,
     val enabled: Boolean = true,
+    val personId: String = MedicationPerson.SELF_ID,
+    val personName: String = "我",
 ) {
     fun validate(): MedicationPlan {
+        MedicationPerson(personId, personName).validate()
         require(name.isNotBlank() && name.length <= 120) { "请填写药名（最多 120 字）" }
         require(dose.isNotBlank() && dose.length <= 120) { "请按医嘱填写每次剂量及单位" }
         require(end == null || !end.isBefore(start)) { "结束日期不能早于开始日期" }
@@ -37,7 +52,9 @@ data class MedicationPlan(
 }
 
 data class Occurrence(val plan: MedicationPlan, val plannedAt: Instant) {
-    val key: String get() = "${plan.id}|${plannedAt.toEpochMilli()}"
+    // 默认用药人沿用旧键，保证升级后的已服状态和稍后提醒可读；换人时隔离剂次状态。
+    val key: String get() = "${plan.id}|${plannedAt.toEpochMilli()}" +
+        if (plan.personId == MedicationPerson.SELF_ID) "" else "|person:${plan.personId}"
 }
 
 /** 每次操作保留药物快照；更正通过 UNDONE 追加事件，不覆盖历史事实。 */
@@ -51,6 +68,8 @@ data class DoseEvent(
     val actualAt: Instant,
     val recordedAt: Instant = Instant.now(),
     val action: DoseAction,
+    val personId: String = MedicationPerson.SELF_ID,
+    val personName: String = "我",
 )
 
 object ScheduleCalculator {

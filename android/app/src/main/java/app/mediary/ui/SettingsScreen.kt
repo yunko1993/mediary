@@ -44,6 +44,7 @@ fun SettingsScreen(model: MediaryViewModel, export: () -> Unit) {
     LazyColumn(contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text("安心设置", fontSize = 27.sp, fontWeight = FontWeight.SemiBold) }
         item { Text("把提醒检查好，把记录留在身边。", fontSize = 13.sp, color = Muted) }
+        item { PeopleSettings(model) }
         item { SoftCard {
             Text("提醒状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Badge(if (notifications) "通知已开启" else "通知未开启", color = if (notifications) Pine else Amber)

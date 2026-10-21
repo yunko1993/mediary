@@ -24,7 +24,8 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismiss: () -> Unit, onSave: (MedicationPlan) -> Unit, existing: MedicationPlan? = null) {
+fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismiss: () -> Unit, onSave: (MedicationPlan) -> Unit,
+    existing: MedicationPlan? = null, people: List<MedicationPerson> = listOf(MedicationPerson.self()), initialPersonId: String? = null) {
     val suggested = remember(draft) { DailyTimePresets.forDraft(draft?.frequency.orEmpty(), draft?.source.orEmpty()) }
     var name by remember { mutableStateOf(existing?.name ?: draft?.name.orEmpty()) }
     var dose by remember { mutableStateOf(existing?.dose ?: draft?.dose.orEmpty()) }
@@ -39,7 +40,10 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
     var confirmed by remember { mutableStateOf(false) }
     var inputError by remember { mutableStateOf<PlanInputException?>(null) }
     var selectingTime by remember { mutableStateOf(false) }
+    // MCP 没有本机用药人标识，草稿必须显式选择归属；手动新增沿用当前筛选。
+    var personId by remember { mutableStateOf(existing?.personId ?: if (draft == null) initialPersonId ?: MedicationPerson.SELF_ID else null) }
     fun edited() { confirmed = false; inputError = null }
+    LaunchedEffect(people) { confirmed = false }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().fillMaxHeight(.96f).padding(horizontal = 10.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp), color = Paper) {
             Column {
@@ -61,6 +65,10 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                             Text("常用钟点是你的提醒偏好，保存前仍需核对；原文有具体时间或服用条件时请按原文调整。", color = Muted, fontSize = 12.sp)
                         }
                     }
+                    Text("用药人", fontWeight = FontWeight.Medium)
+                    PersonPicker(people, personId, { personId = it; edited() })
+                    Text(if (draft != null) "请按医嘱原文选择用药人；未提供归属时由你确认。" else "可在「设置 → 用药人」添加或修改称呼。", color = Muted, fontSize = 12.sp)
+                    if (existing != null && personId != existing.personId) Text("更换用药人后，原人的记录保留，新的人不会沿用原人的已服状态；请核对今日安排。", color = Amber, fontSize = 12.sp)
                     OutlinedTextField(name, { name = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("药名") }, isError = inputError?.field == PlanInputField.NAME, singleLine = true)
                     OutlinedTextField(dose, { dose = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("每次剂量（包含单位）") }, placeholder = { Text("照医嘱填写，不自动换算") }, isError = inputError?.field == PlanInputField.DOSE, singleLine = true)
                     OutlinedTextField(instructions, { instructions = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("饭前后要求 / 注意事项") }, minLines = 2)
@@ -96,7 +104,7 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                     OutlinedTextField(source, { source = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("医嘱原文 / 来源备注") }, minLines = 3)
                     Row(verticalAlignment = Alignment.Top) {
                         Checkbox(confirmed, { confirmed = it })
-                        Text("我已核对药名、每次剂量、频次、时间和疗程，内容符合医生或药师的指示。", fontSize = 12.sp, color = Ink, modifier = Modifier.padding(top = 12.dp))
+                        Text("我已核对用药人、药名、每次剂量、频次、时间和疗程，内容符合医生或药师的指示。", fontSize = 12.sp, color = Ink, modifier = Modifier.padding(top = 12.dp))
                     }
                 }
                 // 保存失败原因固定在按钮上方，避免被长医嘱或滚动位置遮住。
@@ -104,7 +112,8 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                 Button(enabled = confirmed && !saving, onClick = {
                     inputError = null
                     try {
-                        onSave(PlanInput(name, dose, instructions, source, kind, times, hours, firstTime, start, end).toPlan(ZoneId.systemDefault(), existing))
+                        val person = people.find { it.id == personId } ?: throw PlanInputException(PlanInputField.PERSON, "请先选择这份计划的用药人")
+                        onSave(PlanInput(name, dose, instructions, source, kind, times, hours, firstTime, start, end).toPlan(ZoneId.systemDefault(), existing, person))
                     } catch (error: PlanInputException) { inputError = error }
                 }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 15.dp).height(50.dp)) { Text(if (saving) "正在保存…" else "确认并保存计划") }
             }

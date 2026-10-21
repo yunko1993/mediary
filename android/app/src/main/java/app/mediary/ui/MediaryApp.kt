@@ -58,6 +58,8 @@ fun MediaryApp(model: MediaryViewModel) {
     val saving by model.saving.collectAsStateWithLifecycle()
     val saveError by model.saveError.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedPersonId by rememberSaveable { mutableStateOf<String?>(null) }
+    val visibleSnapshot = snapshot.forPerson(selectedPersonId)
     var editor by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<ImportDraft?>(null) }
     var editingPlan by remember { mutableStateOf<MedicationPlan?>(null) }
@@ -99,17 +101,19 @@ fun MediaryApp(model: MediaryViewModel) {
                     Icon(Icons.Outlined.NotificationsActive, null, Modifier.size(16.dp), tint = Amber)
                     Spacer(Modifier.width(8.dp)); Text("提醒权限尚未就绪，点此检查", color = Amber, fontSize = 12.sp)
                 }
+                if (snapshot.loaded && tab <= 2) PersonPicker(snapshot.people, selectedPersonId, { selectedPersonId = it }, allowAll = true,
+                    modifier = Modifier.padding(horizontal = 24.dp))
                 if (!snapshot.loaded) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 else when (tab) {
-                    0 -> TodayScreen(snapshot, now, { recordTarget = it }, { model.snooze(it) }, { tab = 3 }, { importing = true })
-                    1 -> PlansScreen(snapshot, model::toggle, model::recordAsNeeded, { draft = null; editingPlan = null; inboxKey = null; model.resetSaveError(); editor = true }, { selected -> draft = null; editingPlan = selected; inboxKey = null; model.resetSaveError(); editor = true })
-                    2 -> HistoryScreen(snapshot, model::undo) { export.launch("mediary-${LocalDate.now()}.json") }
+                    0 -> TodayScreen(visibleSnapshot, now, { recordTarget = it }, { model.snooze(it) }, { tab = 3 }, { importing = true })
+                    1 -> PlansScreen(visibleSnapshot, model::toggle, model::recordAsNeeded, { draft = null; editingPlan = null; inboxKey = null; model.resetSaveError(); editor = true }, { selected -> draft = null; editingPlan = selected; inboxKey = null; model.resetSaveError(); editor = true })
+                    2 -> HistoryScreen(visibleSnapshot, model::undo) { export.launch("mediary-${LocalDate.now()}.json") }
                     3 -> SettingsScreen(model) { export.launch("mediary-${LocalDate.now()}.json") }
                 }
             }
         }
         if (importing && !editor) McpInboxSheet(model, onDismiss = { importing = false }, onReview = { selected, key -> draft = selected; editingPlan = null; inboxKey = key; model.resetSaveError(); editor = true }, onSettings = { importing = false; tab = 3 })
-        if (editor) PlanEditor(draft = draft, existing = editingPlan, saving = saving, saveError = saveError, onDismiss = { if (!saving) editor = false }, onSave = { plan -> model.save(plan, inboxKey, editingPlan) {
+        if (editor) PlanEditor(draft = draft, existing = editingPlan, people = snapshot.people, initialPersonId = selectedPersonId, saving = saving, saveError = saveError, onDismiss = { if (!saving) editor = false }, onSave = { plan -> model.save(plan, inboxKey, editingPlan) {
             editor = false
         } })
         recordTarget?.let { target -> RecordDialog(target, onDismiss = { recordTarget = null }, onRecord = { action, actual -> model.record(target, action, actual); recordTarget = null }) }
@@ -167,7 +171,7 @@ private fun TodayScreen(snapshot: Snapshot, now: Instant, record: (Occurrence) -
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         Text(if (selectedDay == today) "TODAY, AT YOUR PACE" else "YOUR MEDICATION DIARY", color = Color(0xFFB9D0B6), fontSize = 10.sp, letterSpacing = 1.4.sp)
                         Text(if (occurrences.isEmpty()) "从一条计划开始" else "已记录 $taken / ${occurrences.size} 次服用", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Medium)
-                        Text(when { occurrences.isEmpty() -> "把医嘱整理好，日常更从容。"; next != null -> "下一次计划  ${next.plannedAt.atZone(zone).format(clockFormat)} · ${next.plan.name}"; else -> "每次记录，都是对自己的照顾。" }, color = Color(0xFFD5E2D3), fontSize = 12.sp)
+                        Text(when { occurrences.isEmpty() -> "把医嘱整理好，日常更从容。"; next != null -> "下一次计划  ${next.plannedAt.atZone(zone).format(clockFormat)} · ${next.plan.personName} · ${next.plan.name}"; else -> "每次记录，都是对自己的照顾。" }, color = Color(0xFFD5E2D3), fontSize = 12.sp)
                     }
                     if (occurrences.isNotEmpty()) {
                         Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
@@ -201,6 +205,7 @@ private fun TodayScreen(snapshot: Snapshot, now: Instant, record: (Occurrence) -
                     Badge(when (state?.action) { DoseAction.TAKEN -> "已服用"; DoseAction.SKIPPED -> "已记为跳过"; else -> if (occurrence.plannedAt < now) "尚未记录" else "待记录" },
                         color = if (state == null && occurrence.plannedAt < now) Amber else Pine, background = if (state == null && occurrence.plannedAt < now) Color(0xFFFBF0E0) else Mint)
                 }
+                Badge(occurrence.plan.personName)
                 Text(occurrence.plan.name, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 Text(occurrence.plan.dose, color = Ink, fontSize = 14.sp)
                 if (occurrence.plan.instructions.isNotBlank()) Text(occurrence.plan.instructions, color = Muted, fontSize = 12.sp)
@@ -239,6 +244,7 @@ internal fun PlansScreen(snapshot: Snapshot, toggle: (MedicationPlan) -> Unit, r
                 Spacer(Modifier.width(10.dp)); Text(plan.name, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 Badge(if (!plan.enabled) "已暂停" else if (plan.end?.isBefore(LocalDate.now()) == true) "已结束" else "使用中")
             }
+            Badge(plan.personName)
             Text(plan.dose, fontSize = 14.sp)
             Text(scheduleLabel(plan), color = Muted, fontSize = 12.sp)
             Text("${plan.start} 至 ${plan.end?.toString() ?: "持续，遵医嘱调整"}", color = Muted, fontSize = 12.sp)
@@ -255,13 +261,14 @@ internal fun PlansScreen(snapshot: Snapshot, toggle: (MedicationPlan) -> Unit, r
     }
     detail?.let { plan -> AlertDialog(onDismissRequest = { detail = null }, title = { Text(plan.name) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("用药人：${plan.personName}")
             Text("每次剂量：${plan.dose}"); Text("${scheduleLabel(plan)}\n${plan.instructions}")
             Text("医嘱原文", fontWeight = FontWeight.SemiBold)
             Text(plan.source.ifBlank { "手动创建的计划" }, color = Muted)
         }
     }, confirmButton = { TextButton(onClick = { detail = null }) { Text("知道了") } }) }
     confirmAsNeeded?.let { plan -> AlertDialog(onDismissRequest = { confirmAsNeeded = null }, title = { Text("记录实际服用") },
-        text = { Text("${plan.name} · ${plan.dose}\n确认刚刚已按医嘱服用？按需记录不改变任何定时计划。") },
+        text = { Text("${plan.personName} · ${plan.name} · ${plan.dose}\n确认刚刚已按医嘱服用？按需记录不改变任何定时计划。") },
         confirmButton = { TextButton(onClick = { recordAsNeeded(plan); confirmAsNeeded = null }) { Text("确认记录") } },
         dismissButton = { TextButton(onClick = { confirmAsNeeded = null }) { Text("取消") } }) }
 }
@@ -282,6 +289,7 @@ private fun HistoryScreen(snapshot: Snapshot, undo: (DoseEvent) -> Unit, export:
                 Text(event.name, fontSize = 17.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 Badge(when(event.action) { DoseAction.TAKEN -> "已服用"; DoseAction.SKIPPED -> "跳过记录"; DoseAction.UNDONE -> "撤销操作" })
             }
+            Badge(event.personName)
             Text(event.dose, color = Muted, fontSize = 13.sp)
             Text("计划  ${event.plannedAt?.atZone(ZoneId.systemDefault())?.format(dateTimeFormat) ?: "按需记录"}", fontSize = 12.sp)
             Text("实际  ${event.actualAt.atZone(ZoneId.systemDefault()).format(dateTimeFormat)}", fontSize = 12.sp)
@@ -290,7 +298,7 @@ private fun HistoryScreen(snapshot: Snapshot, undo: (DoseEvent) -> Unit, export:
         } }
     }
     undoTarget?.let { event -> AlertDialog(onDismissRequest = { undoTarget = null }, title = { Text("撤销这次登记？") },
-        text = { Text("原操作会保留在历史中。定时剂次会回到待记录状态，过去的提醒不会自动补发。") },
+        text = { Text("${event.personName} · ${event.name}\n原操作会保留在历史中。定时剂次会回到待记录状态，过去的提醒不会自动补发。") },
         confirmButton = { TextButton(onClick = { undo(event); undoTarget = null }) { Text("撤销登记") } },
         dismissButton = { TextButton(onClick = { undoTarget = null }) { Text("保留") } }) }
 }
@@ -310,6 +318,7 @@ private fun RecordDialog(occurrence: Occurrence, onDismiss: () -> Unit, onRecord
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("记录实际服药") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("用药人：${occurrence.plan.personName}")
             Text("${occurrence.plan.name} · ${occurrence.plan.dose}", fontWeight = FontWeight.Medium)
             Text("计划 ${occurrence.plannedAt.atZone(zone).format(dateTimeFormat)}", color = Muted)
             OutlinedTextField(value = actual, onValueChange = { actual = it; error = null }, label = { Text("实际时间，可补录") }, placeholder = { Text("2026-10-19 08:00") }, singleLine = true)

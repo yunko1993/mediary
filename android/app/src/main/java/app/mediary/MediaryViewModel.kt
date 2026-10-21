@@ -26,6 +26,36 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
     val saveError = mutableSaveError.asStateFlow()
     private val mutableInboxSync = MutableStateFlow(InboxSyncState())
     val inboxSync = mutableInboxSync.asStateFlow()
+    private val mutablePersonSaving = MutableStateFlow(false)
+    val personSaving = mutablePersonSaving.asStateFlow()
+    private val mutablePersonError = MutableStateFlow<String?>(null)
+    val personError = mutablePersonError.asStateFlow()
+
+    fun resetPersonError() { mutablePersonError.value = null }
+
+    fun savePerson(original: MedicationPerson?, name: String, success: () -> Unit) {
+        if (mutablePersonSaving.value) return
+        mutablePersonSaving.value = true
+        mutablePersonError.value = null
+        viewModelScope.launch {
+            try {
+                val person = MedicationPerson(original?.id ?: java.util.UUID.randomUUID().toString(), name.trim())
+                val reminderFailed = withContext(Dispatchers.IO) {
+                    app.repository.savePerson(person)
+                    try {
+                        // 改称呼后收起原称呼通知，下一次提醒读取新称呼；历史快照不改写。
+                        app.repository.snapshot.value.plans.filter { it.personId == person.id }.forEach { app.scheduler.cancelForEdit(it, emptyList()) }
+                        app.scheduler.reschedule()
+                        false
+                    } catch (_: Exception) { true }
+                }
+                success()
+                report(if (reminderFailed) "用药人已保存，请重新打开应用检查提醒" else "用药人已保存")
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutablePersonError.value = error.message ?: "用药人未能保存，请重试" }
+            finally { mutablePersonSaving.value = false }
+        }
+    }
 
     fun clearMessage() { mutableMessage.value = null }
     fun report(text: String) { mutableMessage.value = text }
@@ -64,7 +94,8 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
 
     fun record(occurrence: Occurrence, action: DoseAction, actualAt: Instant = Instant.now()) = execute {
         val event = DoseEvent(key = occurrence.key, planId = occurrence.plan.id, name = occurrence.plan.name, dose = occurrence.plan.dose,
-            plannedAt = occurrence.plannedAt, actualAt = actualAt, action = action)
+            plannedAt = occurrence.plannedAt, actualAt = actualAt, action = action,
+            personId = occurrence.plan.personId, personName = occurrence.plan.personName)
         val changed = app.repository.record(event)
         app.scheduler.dismiss(occurrence); app.scheduler.reschedule()
         report(if (changed) "记录已保存" else "这次已有记录，可在历史页更正")
@@ -75,7 +106,8 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
         val courseEnd = plan.end
         require(plan.enabled && today >= plan.start && (courseEnd == null || today <= courseEnd)) { "当前不在此计划的有效日期内，请先核对计划" }
         app.repository.record(DoseEvent(key = "${plan.id}|manual|${java.util.UUID.randomUUID()}", planId = plan.id, name = plan.name,
-            dose = plan.dose, plannedAt = null, actualAt = Instant.now(), action = DoseAction.TAKEN))
+            dose = plan.dose, plannedAt = null, actualAt = Instant.now(), action = DoseAction.TAKEN,
+            personId = plan.personId, personName = plan.personName))
         report("按需服药记录已保存")
     }
 

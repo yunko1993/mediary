@@ -8,7 +8,7 @@ import java.time.format.DateTimeParseException
 import java.time.format.ResolverStyle
 import java.util.Locale
 
-enum class PlanInputField { NAME, DOSE, TIMES, INTERVAL_HOURS, FIRST_TIME, START, END }
+enum class PlanInputField { PERSON, NAME, DOSE, TIMES, INTERVAL_HOURS, FIRST_TIME, START, END }
 
 class PlanInputException(val field: PlanInputField, message: String) : IllegalArgumentException(message)
 
@@ -25,7 +25,8 @@ data class PlanInput(
     val start: String,
     val end: String = "",
 ) {
-    fun toPlan(zone: ZoneId, original: MedicationPlan? = null): MedicationPlan {
+    fun toPlan(zone: ZoneId, original: MedicationPlan? = null, person: MedicationPerson = original?.let { MedicationPerson(it.personId, it.personName) } ?: MedicationPerson.self()): MedicationPlan {
+        person.validate()
         if (name.isBlank() || name.trim().length > 120) invalid(PlanInputField.NAME, "请填写药名（最多 120 字）")
         if (dose.isBlank() || dose.trim().length > 120) invalid(PlanInputField.DOSE, "请按医嘱填写每次剂量及单位（最多 120 字）")
         val startDate = date(start, PlanInputField.START, "开始日期")
@@ -49,7 +50,8 @@ data class PlanInput(
             else startDate.atTime(first).atZone(zone).toInstant()
         } else null
         val plan = MedicationPlan(name = name.trim(), dose = dose.trim(), instructions = instructions.trim(), source = source.trim(),
-            kind = kind, times = reminderTimes, intervalHours = interval, anchor = anchor, start = startDate, end = endDate)
+            kind = kind, times = reminderTimes, intervalHours = interval, anchor = anchor, start = startDate, end = endDate,
+            personId = person.id, personName = person.name)
         return (if (original == null) plan else plan.copy(id = original.id, enabled = original.enabled)).validate()
     }
 

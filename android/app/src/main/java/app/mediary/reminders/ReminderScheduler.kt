@@ -58,31 +58,31 @@ class ReminderScheduler(private val context: Context, private val repository: Me
                 notificationManager.activeNotifications.filter { it.tag?.startsWith("${plan.id}|") == true }.forEach { notificationManager.cancel(it.tag, it.id) }
             }
             ScheduleCalculator.next(plan, now, ZoneId.systemDefault())?.let { occurrence ->
-                scheduleAt(occurrence.plannedAt.toEpochMilli(), alarmIntent(plan.id, occurrence.plannedAt.toEpochMilli()))
+                scheduleAt(occurrence.plannedAt.toEpochMilli(), alarmIntent(plan.id, occurrence.plannedAt.toEpochMilli(), plan.personId))
             }
         }
         repository.snapshot.value.snoozes.forEach { snooze ->
             val plan = repository.snapshot.value.plans.find { it.id == snooze.planId }
             if (plan != null) {
                 val occurrence = Occurrence(plan, snooze.plannedAt)
-                alarmManager.cancel(snoozeIntent(occurrence))
-                if (plan.enabled && snooze.remindAt > now && repository.snapshot.value.state(snooze.key) == null) {
+                alarmManager.cancel(snoozeIntent(occurrence, snooze.key))
+                if (snooze.key == occurrence.key && plan.enabled && snooze.remindAt > now && repository.snapshot.value.state(snooze.key) == null) {
                     scheduleAt(snooze.remindAt.toEpochMilli(), snoozeIntent(occurrence))
                 } else repository.clearSnooze(snooze.key)
             } else repository.clearSnooze(snooze.key)
         }
     }
 
-    private fun alarmIntent(planId: String, plannedAt: Long): PendingIntent = PendingIntent.getBroadcast(context, 0,
+    private fun alarmIntent(planId: String, plannedAt: Long, personId: String = MedicationPerson.SELF_ID): PendingIntent = PendingIntent.getBroadcast(context, 0,
         Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_REMIND; data = "mediary://alarm/$planId".toUri()
-            putExtra("planId", planId); putExtra("plannedAt", plannedAt)
+            putExtra("planId", planId); putExtra("plannedAt", plannedAt); putExtra("personId", personId)
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     /** 编辑事务落盘后取消旧主闹钟、稍后闹钟和已显示通知，再安排新计划。 */
     fun cancelForEdit(plan: MedicationPlan, previousSnoozes: List<SnoozedReminder>) {
         alarmManager.cancel(alarmIntent(plan.id, 0))
-        previousSnoozes.forEach { alarmManager.cancel(snoozeIntent(Occurrence(plan, it.plannedAt))) }
+        previousSnoozes.forEach { alarmManager.cancel(snoozeIntent(Occurrence(plan, it.plannedAt), it.key)) }
         notificationManager.activeNotifications.filter { it.tag?.startsWith("${plan.id}|") == true }.forEach { notificationManager.cancel(it.tag, it.id) }
     }
 
@@ -103,10 +103,10 @@ class ReminderScheduler(private val context: Context, private val repository: Me
         notificationManager.cancel(occurrence.key, 0)
     }
 
-    private fun snoozeIntent(occurrence: Occurrence): PendingIntent = PendingIntent.getBroadcast(context, 0,
+    private fun snoozeIntent(occurrence: Occurrence, key: String = occurrence.key): PendingIntent = PendingIntent.getBroadcast(context, 0,
         Intent(context, ReminderReceiver::class.java).apply {
-            action = ACTION_REMIND; data = "mediary://snooze/${Uri.encode(occurrence.key)}".toUri()
-            putExtra("planId", occurrence.plan.id); putExtra("plannedAt", occurrence.plannedAt.toEpochMilli())
+            action = ACTION_REMIND; data = "mediary://snooze/${Uri.encode(key)}".toUri()
+            putExtra("planId", occurrence.plan.id); putExtra("plannedAt", occurrence.plannedAt.toEpochMilli()); putExtra("personId", occurrence.plan.personId)
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     fun dismiss(occurrence: Occurrence) {
@@ -147,7 +147,7 @@ class ReminderScheduler(private val context: Context, private val repository: Me
         val plannedTime = occurrence.plannedAt.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
         val content = "计划 $plannedTime · ${plan.dose}\n${plan.instructions}".trim()
         val builder = NotificationCompat.Builder(context, channelId)
-            .setContentTitle(plan.name).setContentText("计划 $plannedTime · ${plan.dose}")
+            .setContentTitle("${plan.personName} · ${plan.name}").setContentText("计划 $plannedTime · ${plan.dose}")
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
             .addAction(0, "已服用", actionIntent(occurrence, ACTION_TAKEN))
             .addAction(0, "稍后提醒", actionIntent(occurrence, ACTION_SNOOZE))
@@ -157,7 +157,7 @@ class ReminderScheduler(private val context: Context, private val repository: Me
     private fun actionIntent(occurrence: Occurrence, actionName: String) = PendingIntent.getBroadcast(context, 0,
         Intent(context, ReminderReceiver::class.java).apply {
             action = actionName; data = "mediary://action/${Uri.encode(occurrence.key)}/$actionName".toUri()
-            putExtra("planId", occurrence.plan.id); putExtra("plannedAt", occurrence.plannedAt.toEpochMilli())
+            putExtra("planId", occurrence.plan.id); putExtra("plannedAt", occurrence.plannedAt.toEpochMilli()); putExtra("personId", occurrence.plan.personId)
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     private fun show(tag: String, builder: NotificationCompat.Builder): Boolean {
@@ -196,6 +196,8 @@ class ReminderReceiver : BroadcastReceiver() {
                 app.repository.refresh()
                 if (intent.action == ReminderScheduler.ACTION_TEST) { app.scheduler.showTestNotification(intent.getLongExtra("expectedAt", 0)); return@launch }
                 val plan = app.repository.snapshot.value.plans.find { it.id == intent.getStringExtra("planId") && it.enabled } ?: return@launch
+                // 旧通知不能在计划换人后登记到新的人；无此字段的旧版通知只属于默认用药人。
+                if ((intent.getStringExtra("personId") ?: MedicationPerson.SELF_ID) != plan.personId) return@launch
                 val occurrence = Occurrence(plan, Instant.ofEpochMilli(intent.getLongExtra("plannedAt", 0)))
                 val date = occurrence.plannedAt.atZone(ZoneId.systemDefault()).toLocalDate()
                 // 接收器不接受任意剂次；只处理排程中存在、尚未登记的原始计划。
@@ -213,7 +215,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     ReminderScheduler.ACTION_SNOOZE -> app.scheduler.snooze(occurrence)
                     ReminderScheduler.ACTION_TAKEN -> {
                         app.repository.record(DoseEvent(key = occurrence.key, planId = plan.id, name = plan.name, dose = plan.dose,
-                            plannedAt = occurrence.plannedAt, actualAt = Instant.now(), action = DoseAction.TAKEN))
+                            plannedAt = occurrence.plannedAt, actualAt = Instant.now(), action = DoseAction.TAKEN, personId = plan.personId, personName = plan.personName))
                         app.scheduler.dismiss(occurrence)
                     }
                 }
