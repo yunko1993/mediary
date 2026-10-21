@@ -3,6 +3,7 @@ package app.mediary.core
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.Instant
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -50,5 +51,23 @@ class PlanInputTest {
     @Test fun asNeededDoesNotRequireHiddenReminderFields() {
         val plan = input().copy(kind = ScheduleKind.AS_NEEDED, times = "无效", hours = "无效", firstTime = "无效").toPlan(zone)
         assertTrue(plan.times.isEmpty()); assertNull(plan.intervalHours); assertNull(plan.anchor)
+    }
+
+    @Test fun editingPreservesIdentityAndPausedStateAcrossScheduleChanges() {
+        val old = input().copy(times = "08:00,18:00").toPlan(zone).copy(enabled = false)
+        val updated = input().copy(name = "测试药乙", dose = "2片", kind = ScheduleKind.AS_NEEDED).toPlan(zone, old)
+        assertEquals(old.id, updated.id)
+        assertFalse(updated.enabled)
+        assertEquals(ScheduleKind.AS_NEEDED, updated.kind)
+        assertTrue(updated.times.isEmpty())
+    }
+
+    @Test fun unchangedIntervalClockRetainsOriginalInstantAfterTimeZoneChange() {
+        val old = input().copy(kind = ScheduleKind.INTERVAL, hours = "8", firstTime = "22:00").toPlan(zone)
+        val changedZone = ZoneId.of("Pacific/Auckland")
+        val clock = old.anchor!!.atZone(changedZone).toLocalTime().toString()
+        val form = input().copy(kind = ScheduleKind.INTERVAL, hours = "8", firstTime = clock, instructions = "核对后的备注")
+        assertEquals(old.anchor, form.toPlan(changedZone, old).anchor)
+        assertEquals(Instant.parse("2026-10-20T19:30:00Z"), form.copy(firstTime = "08:30").toPlan(changedZone, old).anchor)
     }
 }

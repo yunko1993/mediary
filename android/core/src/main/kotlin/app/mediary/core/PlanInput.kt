@@ -25,7 +25,7 @@ data class PlanInput(
     val start: String,
     val end: String = "",
 ) {
-    fun toPlan(zone: ZoneId): MedicationPlan {
+    fun toPlan(zone: ZoneId, original: MedicationPlan? = null): MedicationPlan {
         if (name.isBlank() || name.trim().length > 120) invalid(PlanInputField.NAME, "请填写药名（最多 120 字）")
         if (dose.isBlank() || dose.trim().length > 120) invalid(PlanInputField.DOSE, "请按医嘱填写每次剂量及单位（最多 120 字）")
         val startDate = date(start, PlanInputField.START, "开始日期")
@@ -42,10 +42,15 @@ data class PlanInput(
         val interval = if (kind == ScheduleKind.INTERVAL) hours.trim().toIntOrNull()?.takeIf { it in 1..168 }
             ?: invalid(PlanInputField.INTERVAL_HOURS, "请填写医嘱明确要求的间隔小时数（1–168）") else null
         val anchor = if (kind == ScheduleKind.INTERVAL) {
-            startDate.atTime(time(firstTime, PlanInputField.FIRST_TIME, "首次时间")).atZone(zone).toInstant()
+            val first = time(firstTime, PlanInputField.FIRST_TIME, "首次时间")
+            // 只改剂量或备注时保留原 Instant，避免跨时区编辑把间隔锚点平移一天。
+            val oldAnchor = original?.anchor
+            if (original?.kind == ScheduleKind.INTERVAL && startDate == original.start && oldAnchor?.atZone(zone)?.toLocalTime()?.withSecond(0)?.withNano(0) == first) oldAnchor
+            else startDate.atTime(first).atZone(zone).toInstant()
         } else null
-        return MedicationPlan(name = name.trim(), dose = dose.trim(), instructions = instructions.trim(), source = source.trim(),
-            kind = kind, times = reminderTimes, intervalHours = interval, anchor = anchor, start = startDate, end = endDate).validate()
+        val plan = MedicationPlan(name = name.trim(), dose = dose.trim(), instructions = instructions.trim(), source = source.trim(),
+            kind = kind, times = reminderTimes, intervalHours = interval, anchor = anchor, start = startDate, end = endDate)
+        return (if (original == null) plan else plan.copy(id = original.id, enabled = original.enabled)).validate()
     }
 
     private fun date(value: String, field: PlanInputField, title: String): LocalDate {

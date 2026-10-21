@@ -2,9 +2,6 @@ export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-export const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
-export const ZHIPU_MODEL = 'glm-4.7-flash';
-
 const fields = ['name', 'dose', 'frequency', 'instructions', 'duration', 'sourceQuote'];
 const labels = { name: '药名', dose: '每次剂量', frequency: '频次', duration: '疗程' };
 const itemSchema = {
@@ -57,95 +54,4 @@ export function validateExtraction(value, source) {
     missing.add('具体提醒时间需人工核对');
     return { ...item, missing: [...missing] };
   }) };
-}
-
-export function readResponse(response) {
-  if (response?.status !== 'completed') throw new ApiError(502, '模型未完成解析，请重试');
-  if (!Array.isArray(response.output)) throw new ApiError(502, '模型返回内容格式异常');
-  const content = response.output.flatMap(item => Array.isArray(item?.content) ? item.content : []);
-  if (content.some(item => !item || typeof item !== 'object' || (item.type === 'output_text' && typeof item.text !== 'string'))) {
-    throw new ApiError(502, '模型返回内容格式异常');
-  }
-  if (content.some(item => item.type === 'refusal')) throw new ApiError(422, '模型未能处理这段内容，可以按医嘱手动添加');
-  const text = content.filter(item => item.type === 'output_text').map(item => item.text).join('');
-  try { return JSON.parse(text); }
-  catch { throw new ApiError(502, '模型返回内容不完整，请重试'); }
-}
-
-/** 固定型号与完整结束标识都通过后，才读取最终内容；推理文本不能代替医嘱草稿。 */
-export function readZhipuResponse(response) {
-  if (response?.model !== ZHIPU_MODEL) throw new ApiError(502, '接口返回的模型标识与 GLM-4.7-Flash 不一致，已停止导入');
-  if (!Array.isArray(response.choices) || response.choices.length !== 1) throw new ApiError(502, '模型返回了多个或空的结果，请重试或手动添加');
-  const choice = response.choices[0];
-  if (choice?.finish_reason !== 'stop') throw new ApiError(502, '模型未完整完成解析，请重试或手动添加');
-  const message = choice.message;
-  if (message?.refusal) throw new ApiError(422, '模型未能处理这段内容，可以按医嘱手动添加');
-  if (message?.tool_calls != null && (!Array.isArray(message.tool_calls) || message.tool_calls.length)) {
-    throw new ApiError(502, '模型返回了工具请求，已停止导入');
-  }
-  if (typeof message?.content !== 'string') throw new ApiError(502, '模型返回内容格式异常');
-  try { return JSON.parse(message.content); }
-  catch { throw new ApiError(502, '模型返回内容不完整，请重试'); }
-}
-
-/** 提供方只由服务端配置决定，不接收手机传入的模型、地址或上游密钥。 */
-export function providerRequest(text, config) {
-  // 兼容旧版直接构造的 Responses 配置；新部署的默认提供方由 configuration 选为智谱。
-  const provider = config.provider ?? 'openai';
-  if (!['zhipu', 'openai'].includes(provider)) throw new ApiError(503, 'AI_PROVIDER 仅支持 zhipu 或 openai');
-  if (provider === 'zhipu' && (config.baseUrl !== ZHIPU_BASE_URL || config.model !== ZHIPU_MODEL)) {
-    throw new ApiError(503, '智谱服务仅允许固定的官方地址和 GLM-4.7-Flash 型号');
-  }
-  if (!config.apiKey?.trim()) throw new ApiError(503,
-    `服务端尚未配置 ${provider === 'zhipu' ? 'ZHIPU_API_KEY' : 'OPENAI_API_KEY'}，手动计划仍可正常使用`);
-  let url;
-  try {
-    url = new URL(config.baseUrl.replace(/\/$/u, '') + (provider === 'zhipu' ? '/chat/completions' : '/responses'));
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error();
-  } catch { throw new ApiError(503, 'AI 服务地址必须是无账号、查询参数和片段的 HTTPS 地址'); }
-  const body = provider === 'zhipu'
-    ? { model: ZHIPU_MODEL, stream: false, max_tokens: 5000, response_format: { type: 'json_object' }, messages: [
-      { role: 'system', content: `${instructions}\n仅输出 JSON 对象，结构必须符合以下 JSON Schema：\n${JSON.stringify(extractionSchema)}` },
-      { role: 'user', content: text },
-    ] }
-    : { model: config.model, store: false, instructions, input: text, max_output_tokens: 5000,
-      text: { format: { type: 'json_schema', name: 'medication_drafts', strict: true, schema: extractionSchema } } };
-  return { provider, url, body };
-}
-
-async function readUpstream(response) {
-  const chunks = [];
-  let size = 0;
-  try {
-    // 同时限制解压后的正文，不能只相信上游 Content-Length。
-    for await (const chunk of response.body) {
-      size += chunk.byteLength;
-      if (size > 1_048_576) throw new ApiError(502, 'AI 返回内容过大，请分段导入');
-      chunks.push(chunk);
-    }
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    throw new ApiError(502, 'AI 服务返回格式异常或读取超时');
-  }
-}
-
-export async function extract(text, config, fetchImpl = fetch) {
-  const request = providerRequest(text, config);
-  let upstream;
-  try {
-    upstream = await fetchImpl(request.url, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(60_000),
-      headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(request.body),
-    });
-  } catch { throw new ApiError(502, '无法连接 AI 服务或请求超时，请稍后重试'); }
-  // 不透传上游错误正文，避免服务响应泄露密钥、请求原文或账号细节。
-  if (!upstream.ok) {
-    await upstream.body?.cancel().catch(() => {});
-    throw new ApiError(upstream.status === 429 ? 429 : 502,
-      upstream.status === 429 ? 'AI 服务请求受限，请稍后再试' : 'AI 服务请求失败，请检查服务端模型和密钥配置');
-  }
-  const response = await readUpstream(upstream);
-  return validateExtraction(request.provider === 'zhipu' ? readZhipuResponse(response) : readResponse(response), text);
 }

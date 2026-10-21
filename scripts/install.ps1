@@ -1,10 +1,10 @@
-param([string]$Serial, [switch]$ConnectGptService, [ValidateSet('Release', 'Debug')][string]$Variant = 'Release', [string]$Apk)
+param([string]$Serial, [switch]$ConnectMcpService, [ValidateSet('Release', 'Debug')][string]$Variant = 'Release', [string]$Apk)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'python.ps1')
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $taskApk = if ($Apk) { $Apk } elseif ($Variant -eq 'Release') { Join-Path $taskRoot 'outputs\release\mediary.apk' } else { Join-Path $taskRoot 'android\app\build\outputs\apk\debug\app-debug.apk' }
 if (-not (Test-Path -LiteralPath $taskApk)) { throw 'Download the release APK or run scripts/build.ps1 for the selected variant first.' }
-if ($ConnectGptService -and $Variant -ne 'Debug') { throw 'Local HTTP development service connections require -Variant Debug.' }
+if ($ConnectMcpService -and $Variant -ne 'Debug') { throw 'Local HTTP development service connections require -Variant Debug.' }
 if ($Variant -eq 'Release') {
     $taskPython = Get-MediaryPython
     $taskPythonArgs = @($taskPython.Arguments)
@@ -30,9 +30,9 @@ if ($Serial) {
 }
 & $taskAdb -s $Serial install -r $taskApk
 if ($LASTEXITCODE -ne 0) { throw 'APK installation failed. Check the confirmation screen on the phone.' }
-if ($ConnectGptService) {
+if ($ConnectMcpService) {
     & $taskAdb -s $Serial reverse tcp:8787 tcp:8787
-    if ($LASTEXITCODE -ne 0) { throw 'Local GPT service connection failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Local MCP service connection failed.' }
 }
 & $taskAdb -s $Serial shell am start -n ($taskPackage + '/app.mediary.MainActivity')
 if ($LASTEXITCODE -ne 0) { throw 'Could not launch Mediary.' }

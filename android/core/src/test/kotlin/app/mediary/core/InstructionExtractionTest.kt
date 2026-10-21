@@ -57,23 +57,22 @@ class InstructionExtractionTest {
         InstructionExtraction.validate(listOf(draft().copy(missing = listOf("a".repeat(101)))), source)
     }
 
-    @Test fun directEndpointRequiresHttpsAndRejectsCredentialsOrParameters() {
-        GptConnectionRules.validateEndpoint("https://api.example.invalid:8443/v1")
+    @Test fun mcpEndpointRequiresHttpsAndRejectsCredentialsOrParameters() {
+        McpConnectionRules.validateEndpoint("https://mediary.example.invalid:8443")
         listOf("http://127.0.0.1:8787", "https://secret@example.invalid/v1", "https://example.invalid/v1?key=secret",
             "https://example.invalid/v1#key", "https://example.invalid:70000/v1", "not a url").forEach { endpoint ->
-            expectInvalid { GptConnectionRules.validateEndpoint(endpoint) }
+            expectInvalid { McpConnectionRules.validateEndpoint(endpoint) }
         }
     }
 
-    @Test fun onlyExplicitLocalRelayMayUseHttp() {
-        GptConnectionRules.validateEndpoint("http://127.0.0.1:8787", allowLocalHttp = true)
-        expectInvalid { GptConnectionRules.validateEndpoint("http://example.invalid", allowLocalHttp = true) }
+    @Test fun onlyExplicitLocalMcpMayUseHttp() {
+        McpConnectionRules.validateEndpoint("http://127.0.0.1:8787", allowLocalHttp = true)
+        expectInvalid { McpConnectionRules.validateEndpoint("http://example.invalid", allowLocalHttp = true) }
     }
 
     @Test fun authorizationCannotContainWhitespaceOrHeaderInjection() {
-        GptConnectionRules.validateSecret("fake-test-key")
-        listOf("", "a b", "a\rb", "a\nb", "a\tb").forEach { secret -> expectInvalid { GptConnectionRules.validateSecret(secret) } }
-        expectInvalid { GptConnectionRules.validateModel("\n") }
+        McpConnectionRules.validateSecret("fake-test-service-token")
+        listOf("", "a b", "a\rb", "a\nb", "a\tb").forEach { secret -> expectInvalid { McpConnectionRules.validateSecret(secret) } }
     }
 
     private fun expectInvalid(block: () -> Unit) {

@@ -16,7 +16,7 @@ class ConnectionSettingsTest {
     private lateinit var context: Context
     private lateinit var name: String
     private lateinit var settings: ConnectionSettings
-    private val address = "https://api.example.invalid/v1"
+    private val address = "https://mediary.example.invalid"
     private val secret = "fake-key-for-device-storage-test"
 
     @Before fun setUp() {
@@ -28,21 +28,13 @@ class ConnectionSettingsTest {
 
     @After fun tearDown() { context.deleteSharedPreferences(name) }
 
-    @Test fun freshInstallDefaultsToIndependentPhoneConnection() {
-        assertEquals(ImportMode.ZHIPU, settings.mode)
-        assertEquals(ZhipuFree.endpoint, settings.active().endpoint)
-        assertEquals(ZhipuFree.model, settings.active().model)
-        assertEquals("", settings.zhipuKey)
-    }
-
-    @Test fun keyRoundTripsButPreferencesContainOnlyCiphertext() {
-        settings.saveDirect(address, "test-model", secret)
-        assertEquals(secret, ConnectionSettings(context, name).active().credential)
-        assertTrue(context.getSharedPreferences(name, Context.MODE_PRIVATE).all.values.none { it.toString().contains(secret) })
+    @Test fun freshInstallHasOnlyAnUnconfiguredMcpConnection() {
+        assertEquals("", settings.mcp().endpoint)
+        assertEquals("", settings.mcp().credential)
     }
 
     @Test fun mcpTokenIsEncryptedAndBoundToItsServiceAddress() {
-        settings.saveMcp("https://mediary.example.invalid/mediary", secret)
+        settings.saveMcp(address, secret)
         assertEquals(secret, ConnectionSettings(context, name).mcpToken)
         val preferences = context.getSharedPreferences(name, Context.MODE_PRIVATE)
         assertTrue(preferences.all.values.none { it.toString().contains(secret) })
@@ -50,56 +42,29 @@ class ConnectionSettingsTest {
         assertEquals("", ConnectionSettings(context, name).mcpToken)
     }
 
-    @Test fun failedValidationDoesNotReplaceSavedConfiguration() {
-        settings.saveDirect(address, "test-model", secret)
-        try { settings.saveDirect("http://example.invalid", "another-model", "another-fake-key"); fail("Expected rejection") }
-        catch (_: IllegalArgumentException) { }
-        assertEquals(address, settings.apiBaseUrl)
-        assertEquals(secret, settings.apiKey)
-        assertEquals("test-model", settings.apiModel)
+    @Test fun failedValidationDoesNotReplaceSavedConnection() {
+        settings.saveMcp(address, secret)
+        for ((endpoint, token) in listOf("http://example.invalid" to secret, address to "short")) {
+            assertThrows(IllegalArgumentException::class.java) { settings.saveMcp(endpoint, token) }
+        }
+        assertEquals(address, settings.mcpEndpoint)
+        assertEquals(secret, settings.mcpToken)
     }
 
-    @Test fun ciphertextCannotBeReusedForADifferentApiAddress() {
-        settings.saveDirect(address, "test-model", secret)
-        context.getSharedPreferences(name, Context.MODE_PRIVATE).edit { putString("apiBaseUrl", "https://other.example.invalid/v1") }
-        assertEquals("", settings.apiKey)
-    }
-
-    @Test fun legacyRelayKeepsItsModeAndNeverBecomesAnApiKey() {
-        settings.saveRelay("https://relay.example.invalid", "fake-relay-token")
-        context.getSharedPreferences(name, Context.MODE_PRIVATE).edit { remove("mode") }
-        assertEquals(ImportMode.RELAY, settings.mode)
-        assertEquals("fake-relay-token", settings.active().credential)
-        assertEquals("", settings.apiKey)
-    }
-
-    @Test fun clearingApiKeyKeepsOtherSettingsAndRelayCredential() {
-        settings.saveRelay("https://relay.example.invalid", "fake-relay-token")
-        settings.saveDirect(address, "test-model", secret)
-        settings.clearDirectKey()
-        assertEquals("", settings.apiKey)
-        assertEquals(address, settings.apiBaseUrl)
-        assertEquals("fake-relay-token", settings.token)
-        assertEquals(ImportMode.DIRECT, settings.mode)
-    }
-
-    @Test fun zhipuKeyHasSeparateEncryptedStorageAndFixedModel() {
-        settings.saveDirect(address, "test-model", secret)
-        settings.saveZhipu("fake-zhipu-key")
+    @Test fun upgradeRemovesRetiredModelSettingsAndKeepsMcpCredential() {
+        settings.saveMcp(address, secret)
+        val preferences = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        val retired = listOf("mode", "apiBaseUrl", "apiModel", "apiKey", "zhipuKey")
+        preferences.edit(commit = true) { retired.forEach { putString(it, "obsolete-test-value") } }
         val restored = ConnectionSettings(context, name)
-        assertEquals(ImportMode.ZHIPU, restored.mode)
-        assertEquals("fake-zhipu-key", restored.active().credential)
-        assertEquals(ZhipuFree.model, restored.active().model)
-        assertEquals(ZhipuFree.endpoint, restored.active().endpoint)
-        assertEquals(secret, restored.apiKey)
-        assertTrue(context.getSharedPreferences(name, Context.MODE_PRIVATE).all.values.none { it.toString().contains("fake-zhipu-key") })
+        assertEquals(address, restored.mcpEndpoint)
+        assertEquals(secret, restored.mcpToken)
+        assertTrue(retired.none { preferences.contains(it) })
     }
 
-    @Test fun clearingZhipuKeyDoesNotRemoveOtherProviders() {
-        settings.saveDirect(address, "test-model", secret)
-        settings.saveZhipu("fake-zhipu-key")
-        settings.clearZhipuKey()
-        assertEquals("", settings.zhipuKey)
-        assertEquals(secret, settings.apiKey)
+    @Test fun legacyServiceAddressRemainsAvailableForMigration() {
+        context.getSharedPreferences(name, Context.MODE_PRIVATE).edit(commit = true) { putString("endpoint", address) }
+        assertEquals(address, ConnectionSettings(context, name).mcpEndpoint)
+        assertEquals("", settings.mcpToken)
     }
 }

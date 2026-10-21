@@ -21,6 +21,7 @@ import app.mediary.MediaryApplication
 import app.mediary.R
 import app.mediary.core.*
 import app.mediary.data.MediaryRepository
+import app.mediary.data.SnoozedReminder
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -77,6 +78,13 @@ class ReminderScheduler(private val context: Context, private val repository: Me
             action = ACTION_REMIND; data = "mediary://alarm/$planId".toUri()
             putExtra("planId", planId); putExtra("plannedAt", plannedAt)
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    /** 编辑事务落盘后取消旧主闹钟、稍后闹钟和已显示通知，再安排新计划。 */
+    fun cancelForEdit(plan: MedicationPlan, previousSnoozes: List<SnoozedReminder>) {
+        alarmManager.cancel(alarmIntent(plan.id, 0))
+        previousSnoozes.forEach { alarmManager.cancel(snoozeIntent(Occurrence(plan, it.plannedAt))) }
+        notificationManager.activeNotifications.filter { it.tag?.startsWith("${plan.id}|") == true }.forEach { notificationManager.cancel(it.tag, it.id) }
+    }
 
     private fun scheduleAt(timestamp: Long, pendingIntent: PendingIntent) {
         // 权限随时可能被撤回；降级提醒必须在设置页明确显示为“可能延迟”。
@@ -195,7 +203,11 @@ class ReminderReceiver : BroadcastReceiver() {
                 if (app.repository.snapshot.value.state(occurrence.key) != null) { app.scheduler.dismiss(occurrence); return@launch }
                 when (intent.action) {
                     ReminderScheduler.ACTION_REMIND -> {
-                        if (intent.data?.host == "snooze") app.repository.clearSnooze(occurrence.key)
+                        if (intent.data?.host == "snooze") {
+                            // 编辑已移除旧稍后提醒；即使进程在取消系统闹钟前退出，也不能发送孤立通知。
+                            if (app.repository.snapshot.value.snoozes.none { it.key == occurrence.key }) return@launch
+                            app.repository.clearSnooze(occurrence.key)
+                        }
                         app.scheduler.notify(occurrence)
                     }
                     ReminderScheduler.ACTION_SNOOZE -> app.scheduler.snooze(occurrence)

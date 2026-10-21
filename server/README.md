@@ -20,7 +20,7 @@ MEDIARY_ACCESS_TOKEN=填入生成的64位十六进制随机口令
 MEDIARY_PORT=8787
 ```
 
-占位值不能原样使用。口令至少 24 位，仅在手机的草稿连接设置及自己的 OAuth 授权页面输入，不放入聊天或 URL。MCP 模式不需要填写 `ZHIPU_API_KEY` / `OPENAI_API_KEY`。
+占位值不能原样使用。口令至少 24 位，仅在手机的草稿连接设置及自己的 OAuth 授权页面输入，不放入聊天或 URL。不需要配置任何模型 API Key。
 
 ```sh
 docker compose config --quiet
@@ -63,13 +63,11 @@ curl --fail http://127.0.0.1:8787/health
 
 手机服务地址是基础地址，不加 `/mcp`；ChatGPT 的 MCP 地址则要加 `/mcp`。创建自定义服务的入口取决于账号和客户端，必须用实际 ChatGPT 账号完成授权和工具调用后才算接入成功。
 
-## 本机运行与可选 AI 中转
+## 本机运行
 
 本机 Node.js 22 可运行 `npm start`，测试为 `node --test`。启用 MCP 时，除了 HTTPS `PUBLIC_BASE_URL` 和服务口令，还需设置本机私有的绝对 `DATA_DIR`，不能使用仓库受跟踪目录。默认只监听 127.0.0.1；本机代理仍需提供 HTTPS。
 
-原 `POST /v1/instructions/parse` 中转保留，Bearer 服务口令鉴权，仅接受 `{ "text": "医嘱原文" }`。可选智谱模式配置 `AI_PROVIDER=zhipu`、`ZHIPU_API_KEY`，固定官方 `glm-4.7-flash`，不回退；可选 Responses 模式配置 `AI_PROVIDER=openai`、`OPENAI_API_KEY`、`OPENAI_MODEL` 和 HTTPS `OPENAI_BASE_URL`。未显式指定提供方的旧 `OPENAI_*` 配置继续兼容。无需这些模型接口时将 Key 留空。
-
-MCP 草稿会持久保存；旧 AI 中转仅在请求内处理，不把整理文本保存为收件箱草稿。两条路径均检查原文证据，手机仍需人工确认。健康检查在 MCP 配置完整时不依赖任何模型 Key；旧中转模式则检查对应模型的本地配置。
+服务只提供 MCP/OAuth 与手机草稿同步，不调用模型 API。旧整理中转接口已移除。健康检查要求 MCP 配置完整。
 
 ## 更新与备份
 
@@ -91,7 +89,7 @@ MCP 草稿会持久保存；旧 AI 中转仅在请求内处理，不把整理文
 | `DEPLOY_SSH_KEY` | 对应服务器的部署私钥 |
 | `DEPLOY_KNOWN_HOSTS` | 已核对的服务器 SSH 主机公钥记录 |
 
-私钥不写进工作流或仓库，工作流不会关闭 SSH 主机校验。提供方 Key 不需要存到 GitHub；服务器初次准备时，单独放在 `/opt/mediary/shared/.env`，权限 600。
+私钥不写进工作流或仓库，工作流不会关闭 SSH 主机校验。服务访问口令在服务器初次准备时单独放在 `/opt/mediary/shared/.env`，权限 600，不写入 GitHub 或镜像。
 
 初次在服务器创建部署目录（按实际部署用户调整）：
 
@@ -106,4 +104,4 @@ install -d -m 700 /opt/mediary/shared
 
 后续版本更新通过 `main` 推送进行。旧发布源码暂不自动删除，也不执行全局 `docker image prune`；按需要人工整理本应用的旧版本。持久化配置始终在 `shared/`，不会随源码发布覆盖。临时停止自动部署可把仓库变量 `DEPLOY_ENABLED` 改为 `false`。
 
-参考：[智谱模型文档](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.7-flash)、[对话补全接口](https://docs.bigmodel.cn/api-reference/模型-api/对话补全)、[Compose 环境变量](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/)、[Compose 服务配置](https://docs.docker.com/reference/compose-file/services/)。
+参考：[Compose 环境变量](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/)、[Compose 服务配置](https://docs.docker.com/reference/compose-file/services/)。

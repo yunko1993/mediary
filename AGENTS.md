@@ -5,7 +5,7 @@
 ## 工作约定
 
 - 安卓采用 Kotlin / Jetpack Compose，`android/core` 放可在 JVM 单独测试的排程规则。
-- 默认通过 ChatGPT 的 MCP 工具保存待核对草稿，安卓主动同步后由用户确认，不需要模型 API Key。`server` 是 Node.js 22 的 MCP/OAuth 与草稿服务，支持 Docker Compose，不需要第三方 npm 运行依赖。原智谱 GLM-4.7-Flash、Responses API 和整理中转保留为可选方式；直连密钥与服务口令用 Android Keystore 加密保存。
+- 默认通过 ChatGPT 的 MCP 工具保存待核对草稿，安卓主动同步后由用户确认，不需要模型 API Key。`server` 是 Node.js 22 的 MCP/OAuth 与草稿服务，支持 Docker Compose，不需要第三方 npm 运行依赖。仅保留 MCP 路径，不提供模型 API 直连或整理中转；服务口令用 Android Keystore 加密保存。
 - MCP 令牌只能按授权范围读取和创建草稿，不能确认计划或启用手机提醒；手机回执必须使用独立的服务访问口令。草稿、OAuth 客户端和令牌摘要必须持久化；禁止把令牌、授权码、口令或医嘱放入访问日志。
 - 计划、服药事件及稍后提醒保存在手机本地。已经确认的提醒不能依赖网络或 GPT。
 - GPT 只提取医嘱原文，未知字段留空，所有草稿必须经过用户核对才能启用提醒。

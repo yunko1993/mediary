@@ -20,8 +20,6 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
     val connection = ConnectionSettings(application)
     private val mutableMessage = MutableStateFlow<String?>(null)
     val message = mutableMessage.asStateFlow()
-    private val mutableImport = MutableStateFlow(ImportState())
-    val importState = mutableImport.asStateFlow()
     private val mutableSaving = MutableStateFlow(false)
     val saving = mutableSaving.asStateFlow()
     private val mutableSaveError = MutableStateFlow<String?>(null)
@@ -34,14 +32,24 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetSaveError() { mutableSaveError.value = null }
 
-    fun save(plan: MedicationPlan, inboxKey: String? = null, success: () -> Unit) {
+    fun save(plan: MedicationPlan, inboxKey: String? = null, original: MedicationPlan? = null, success: () -> Unit) {
         if (mutableSaving.value) return
         mutableSaving.value = true
         mutableSaveError.value = null
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { app.repository.save(plan, inboxKey); app.scheduler.reschedule() }
-                success(); report("计划已保存")
+                val reminderFailed = withContext(Dispatchers.IO) {
+                    val previousSnoozes = if (original != null) app.repository.edit(original, plan) else {
+                        app.repository.save(plan, inboxKey); emptyList()
+                    }
+                    // 本地保存与系统闹钟属于不同事务；闹钟失败不能误报成“计划未保存”。
+                    try {
+                        if (original != null) app.scheduler.cancelForEdit(plan, previousSnoozes)
+                        app.scheduler.reschedule()
+                        false
+                    } catch (_: Exception) { true }
+                }
+                success(); report(if (reminderFailed) "计划已保存，但提醒安排未完成，请检查提醒权限后重新打开应用" else if (original != null) "计划已更新，历史记录保留" else "计划已保存")
                 if (inboxKey != null) syncInbox()
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { mutableSaveError.value = error.message ?: "计划未能保存，请重试" }
@@ -82,22 +90,6 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
         app.scheduler.snooze(occurrence); report("将在 10 分钟后再次提醒，原计划时间不变")
     }
 
-    fun parse(text: String) {
-        if (mutableImport.value.busy) return
-        mutableImport.value = ImportState(busy = true)
-        viewModelScope.launch {
-            try {
-                val drafts = withContext(Dispatchers.IO) { ImportClient.parse(connection, text) }
-                mutableImport.value = ImportState(drafts = drafts, completed = true)
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                mutableImport.value = ImportState(error = error.message ?: "导入失败，请稍后重试")
-            }
-        }
-    }
-
-    fun resetImport() { mutableImport.value = ImportState() }
-
     fun syncInbox() {
         if (mutableInboxSync.value.busy) return
         val profile = connection.mcp()
@@ -125,10 +117,6 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun markDraftSaved(draft: ImportDraft) {
-        mutableImport.value = mutableImport.value.copy(savedDrafts = mutableImport.value.savedDrafts + draft.key)
-    }
-
     fun export(uri: Uri) = execute {
         val json = app.repository.exportJson()
         app.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(json) }
@@ -147,5 +135,4 @@ class MediaryViewModel(application: Application) : AndroidViewModel(application)
     }
 }
 
-data class ImportState(val busy: Boolean = false, val drafts: List<ImportDraft> = emptyList(), val error: String? = null, val completed: Boolean = false, val savedDrafts: Set<String> = emptySet())
 data class InboxSyncState(val busy: Boolean = false, val syncedAt: Instant? = null, val error: String? = null)

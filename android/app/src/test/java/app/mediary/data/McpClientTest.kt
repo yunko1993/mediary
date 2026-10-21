@@ -10,7 +10,7 @@ import org.junit.Test
 
 class McpClientTest {
     private val account = "https://mediary.example.invalid/mediary"
-    private val profile = GptConnection(ImportMode.RELAY, account, "fake-test-service-token-1234567890")
+    private val profile = McpConnection(account, "fake-test-service-token-1234567890")
     private val source = "测试药甲，每次1片，每日三次。"
     private fun entry() = JSONObject().put("id", "11111111-1111-4111-8111-111111111111").put("sourceText", source)
         .put("createdAt", "2026-10-20T00:00:00Z").put("reviewedAt", JSONObject.NULL).put("medication", JSONObject()

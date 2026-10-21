@@ -7,7 +7,6 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -25,7 +24,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.net.toUri
 import app.mediary.MediaryViewModel
 import app.mediary.BuildConfig
-import app.mediary.data.ImportMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -34,21 +32,9 @@ import java.time.format.DateTimeFormatter
 fun SettingsScreen(model: MediaryViewModel, export: () -> Unit) {
     val context = LocalContext.current
     var revision by remember { mutableIntStateOf(0) }
-    var endpoint by remember { mutableStateOf(model.connection.endpoint) }
-    var token by remember { mutableStateOf(model.connection.token) }
-    var mode by remember { mutableStateOf(model.connection.mode) }
-    var apiBase by remember { mutableStateOf(model.connection.apiBaseUrl) }
-    var apiModel by remember { mutableStateOf(model.connection.apiModel) }
-    var apiKey by remember { mutableStateOf(model.connection.apiKey) }
-    var hasSavedKey by remember { mutableStateOf(apiKey.isNotBlank()) }
-    var zhipuKey by remember { mutableStateOf(model.connection.zhipuKey) }
-    var hasZhipuKey by remember { mutableStateOf(zhipuKey.isNotBlank()) }
-    var advanced by remember { mutableStateOf(mode == ImportMode.RELAY) }
-    var error by remember { mutableStateOf<String?>(null) }
     var mcpEndpoint by remember { mutableStateOf(model.connection.mcpEndpoint) }
     var mcpToken by remember { mutableStateOf(model.connection.mcpToken) }
     var mcpError by remember { mutableStateOf<String?>(null) }
-    var optionalApi by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { revision++ }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++; model.refresh() }
     val notifications = remember(revision) { model.app.scheduler.notificationsAllowed() }
@@ -91,69 +77,16 @@ fun SettingsScreen(model: MediaryViewModel, export: () -> Unit) {
             Text("ChatGPT 连接你的 Mediary MCP 服务；手机从同一服务领取草稿，核对后才启用提醒。只同步草稿与保存回执，不上传服药历史。", color = Muted, fontSize = 12.sp)
             OutlinedTextField(mcpEndpoint, { if (it != mcpEndpoint) mcpToken = ""; mcpEndpoint = it; mcpError = null }, label = { Text("Mediary 服务地址") }, placeholder = { Text("https://你的服务/mediary") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             OutlinedTextField(mcpToken, { mcpToken = it; mcpError = null }, label = { Text("服务访问口令") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
-            Text("这是你自己的服务口令，用于手机同步和网页授权；无需填写智谱或 OpenAI Key。口令仅加密保存在本机，不要发送到聊天中。", color = Muted, fontSize = 11.sp)
+            Text("这是你自己的服务口令，用于手机同步和网页授权；无需填写模型 API Key。口令仅加密保存在本机，不要发送到聊天中。", color = Muted, fontSize = 11.sp)
             mcpError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
             Button(onClick = { runCatching { model.connection.saveMcp(mcpEndpoint, mcpToken); model.report("草稿连接已保存，可打开收件箱同步") }.onFailure { mcpError = it.message } }) { Text("保存草稿连接") }
             Text("在 ChatGPT 网页添加自定义 MCP 服务，地址为上方服务地址后加 /mcp，授权方式选 OAuth。具体入口以你的账号为准。", color = Muted, fontSize = 12.sp)
         } }
-        item { TextButton(onClick = { optionalApi = !optionalApi }) { Text(if (optionalApi) "收起可选 API 整理设置" else "可选：模型 API 直连与整理服务") } }
-        if (optionalApi) {
-        item { SoftCard {
-            Text("AI 医嘱整理", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Badge(when (mode) { ImportMode.ZHIPU -> "智谱 · GLM-4.7-Flash"; ImportMode.DIRECT -> "其他 API 直连"; ImportMode.RELAY -> "自有整理服务" })
-            Text(if (mode != ImportMode.RELAY) "填写你自己的 API 密钥，手机即可独立整理医嘱，无需电脑在线。只在你主动导入时联网。"
-                else "使用你已部署的整理服务；该模式需要服务保持在线。", color = Muted, fontSize = 12.sp)
-            TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "收起接口设置" else "接口地址、模型与连接方式") }
-            if (advanced) {
-                listOf(ImportMode.ZHIPU to "智谱 GLM-4.7-Flash", ImportMode.DIRECT to "其他 API 直连", ImportMode.RELAY to "自有服务（可选）").forEach { (choice, label) ->
-                    Row(Modifier.fillMaxWidth().clickable { mode = choice; error = null }, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        RadioButton(selected = mode == choice, onClick = { mode = choice; error = null })
-                        Text(label, fontSize = 13.sp)
-                    }
-                }
-            }
-            if (mode == ImportMode.ZHIPU) {
-                Text("模型已固定：glm-4.7-flash", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                Text("仅请求智谱官方 GLM-4.7-Flash，并核对返回的模型标识。失败不会自动切换其他型号。模型价格和限流以智谱平台为准。", color = Muted, fontSize = 11.sp)
-                OutlinedTextField(zhipuKey, { zhipuKey = it; error = null }, label = { Text("智谱 API Key") }, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
-                Text("智谱密钥单独加密保存在本机，只发送到 open.bigmodel.cn。", color = Muted, fontSize = 11.sp)
-            } else if (mode == ImportMode.DIRECT) {
-                if (advanced) {
-                    OutlinedTextField(apiBase, { if (it != apiBase) apiKey = ""; apiBase = it; error = null }, label = { Text("API 基础地址") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    OutlinedTextField(apiModel, { apiModel = it; error = null }, label = { Text("模型名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    Text("兼容接口需支持 Responses API 和结构化输出。更换地址后，请重新填写对应接口的密钥。", color = Muted, fontSize = 11.sp)
-                }
-                OutlinedTextField(apiKey, { apiKey = it; error = null }, label = { Text("API 密钥") }, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
-                Text("密钥在本机加密保存，只发给你设置的 API 地址。请使用自己的密钥；卸载后需重新填写。", color = Muted, fontSize = 11.sp)
-            } else {
-                OutlinedTextField(endpoint, { if (it != endpoint) token = ""; endpoint = it; error = null }, label = { Text("医嘱整理服务地址") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(token, { token = it; error = null }, label = { Text("服务访问口令") }, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true)
-            }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-            Button(onClick = { runCatching {
-                when (mode) {
-                    ImportMode.ZHIPU -> { model.connection.saveZhipu(zhipuKey); hasZhipuKey = true }
-                    ImportMode.DIRECT -> { model.connection.saveDirect(apiBase, apiModel, apiKey); hasSavedKey = true }
-                    ImportMode.RELAY -> model.connection.saveRelay(endpoint, token)
-                }
-                model.report("AI 设置已保存，可从医嘱导入开始使用")
-            }.onFailure { error = it.message } }) { Text("保存 AI 设置") }
-            if (mode == ImportMode.ZHIPU && hasZhipuKey) TextButton(onClick = {
-                model.connection.clearZhipuKey(); zhipuKey = ""; hasZhipuKey = false; model.report("本机智谱密钥已清除")
-            }) { Text("清除已保存的智谱密钥") }
-            if (mode == ImportMode.DIRECT && hasSavedKey) TextButton(onClick = {
-                model.connection.clearDirectKey(); apiKey = ""; hasSavedKey = false; model.report("本机 API 密钥已清除")
-            }) { Text("清除已保存的 API 密钥") }
-        } }
-        }
         item { SoftCard {
             Text("我的数据", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Text("计划和历史保存在本机，不自动上传。卸载会清除本机数据，请按需导出。", color = Muted, fontSize = 12.sp)
             OutlinedButton(onClick = export) { Text("导出 JSON 备份") }
         } }
-        item { Text("Mediary 0.2.0 · 用药手记\n你记录的每一次，都有迹可循。", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp)) }
+        item { Text("Mediary ${BuildConfig.VERSION_NAME} · 用药手记\n你记录的每一次，都有迹可循。", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 12.dp)) }
     }
 }

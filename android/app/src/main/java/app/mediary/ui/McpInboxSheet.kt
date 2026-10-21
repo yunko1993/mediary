@@ -17,7 +17,7 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun McpInboxSheet(model: MediaryViewModel, onDismiss: () -> Unit, onReview: (ImportDraft, String?) -> Unit, onSettings: () -> Unit, onApiImport: () -> Unit) {
+fun McpInboxSheet(model: MediaryViewModel, onDismiss: () -> Unit, onReview: (ImportDraft, String?) -> Unit, onSettings: () -> Unit) {
     val snapshot by model.snapshot.collectAsStateWithLifecycle()
     val sync by model.inboxSync.collectAsStateWithLifecycle()
     val account = model.connection.mcpEndpoint
@@ -48,7 +48,6 @@ fun McpInboxSheet(model: MediaryViewModel, onDismiss: () -> Unit, onReview: (Imp
                 }
             }
             Text("草稿不会自动变成提醒。已保存的本地计划在断网时仍可提醒；手机服药历史不会上传。", color = Muted, fontSize = 12.sp)
-            TextButton(onClick = onApiImport) { Text("可选：直接使用模型 API 整理文字") }
             Spacer(Modifier.height(30.dp))
         }
     }

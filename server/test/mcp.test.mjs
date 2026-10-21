@@ -32,8 +32,8 @@ async function needsOAuth(response, error = 'invalid_token', scope = 'drafts:rea
 async function service(callback, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'mediary-mcp-'));
   const store = new Store(directory);
-  const config = { token: owner, publicBaseUrl: resource.slice(0, -4), dataDir: directory, apiKey: '' };
-  const app = createApp(config, { store, fetchImpl: () => { throw new Error('MCP must never call model APIs'); }, ...options });
+  const config = { token: owner, publicBaseUrl: resource.slice(0, -4), dataDir: directory };
+  const app = createApp(config, { store, ...options });
   app.listen(0, '127.0.0.1'); await once(app, 'listening');
   try { await callback(`http://127.0.0.1:${app.address().port}`, store, config); }
   finally { app.closeAllConnections(); await new Promise(resolve => app.close(resolve)); rmSync(directory, { recursive: true }); }
@@ -81,7 +81,7 @@ async function authorize(url, scope = 'drafts:read drafts:write offline_access')
 }
 
 test('MCP-only health and discovery work without an AI key; medical data requires OAuth', async () => service(async url => {
-  const health = await fetch(`${url}/health`); assert.equal(health.status, 200); assert.equal((await health.json()).gptConfigured, false);
+  const health = await fetch(`${url}/health`); assert.equal(health.status, 200); assert.deepEqual(await health.json(), { status: 'ok', mcpConfigured: true, accessConfigured: true });
   const blocked = await fetch(`${url}/mcp`); assert.equal(blocked.status, 401);
   assert.match(blocked.headers.get('www-authenticate'), /oauth-protected-resource/u);
   await needsOAuth(await rpc(url, owner, 'tools/call', { name: 'get_sync_status' }));

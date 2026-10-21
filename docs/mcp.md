@@ -1,6 +1,6 @@
 # ChatGPT → Mediary 草稿收件箱
 
-在 ChatGPT 整理医嘱，通过 MCP 保存草稿，再在安卓端领取、核对并保存本地计划。这条路径不调用模型 API，不需要 OpenAI 或智谱 Key；ChatGPT 的模型和额度由你的订阅及账号决定。
+在 ChatGPT 整理医嘱，通过 MCP 保存草稿，再在安卓端领取、核对并保存本地计划。这条路径不调用模型 API，不需要模型 API Key；ChatGPT 的模型和额度由你的订阅及账号决定。
 
 ## 接入
 
@@ -11,7 +11,7 @@
 5. 安装该连接后，在对话中用 `@Mediary` 选择它，发送已经去除无关身份信息的医嘱原文，例如“请按原文保存成 Mediary 待核对草稿；未知字段留空”。
 6. 打开安卓右上角的 **ChatGPT 草稿收件箱**，同步、逐项核对药名和剂量，自己设置日期与提醒时间，再保存计划。
 
-ChatGPT 的自定义服务入口受账号、工作区权限、客户端版本及开放情况影响。这里实现的是标准 MCP 服务；部署通过不等于某个 Plus 账号已获得创建入口。如果当前账号没有自定义入口，不要关闭鉴权或把服务口令交给聊天模型来绕过；保留本地手工添加及可选 API 导入。支持安装自定义 MCP 的其他客户端也可接入，但本版本 OAuth 仅允许 ChatGPT 的 HTTPS 回调。
+ChatGPT 的自定义服务入口受账号、工作区权限、客户端版本及开放情况影响。这里实现的是标准 MCP 服务；部署通过不等于某个 Plus 账号已获得创建入口。如果当前账号没有自定义入口，不要关闭鉴权或把服务口令交给聊天模型来绕过；使用本地手工添加。支持安装自定义 MCP 的其他客户端也可接入，但本版本 OAuth 仅允许 ChatGPT 的 HTTPS 回调。
 
 当前官方入口说明：[添加自定义 MCP](https://developers.openai.com/api/docs/guides/custom-mcp-server)、[OAuth 要求](https://developers.openai.com/plugins/build/auth)、[连接与测试](https://developers.openai.com/plugins/deploy/connect-chatgpt)。账号与手机客户端可用性需实际验证，不在应用中承诺所有套餐都可用。
 

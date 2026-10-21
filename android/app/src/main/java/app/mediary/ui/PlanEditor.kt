@@ -24,18 +24,18 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismiss: () -> Unit, onSave: (MedicationPlan) -> Unit) {
+fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismiss: () -> Unit, onSave: (MedicationPlan) -> Unit, existing: MedicationPlan? = null) {
     val suggested = remember(draft) { DailyTimePresets.forDraft(draft?.frequency.orEmpty(), draft?.source.orEmpty()) }
-    var name by remember { mutableStateOf(draft?.name.orEmpty()) }
-    var dose by remember { mutableStateOf(draft?.dose.orEmpty()) }
-    var instructions by remember { mutableStateOf(draft?.instructions.orEmpty()) }
-    var source by remember { mutableStateOf(draft?.source.orEmpty()) }
-    var kind by remember { mutableStateOf(ScheduleKind.DAILY) }
-    var times by remember { mutableStateOf(suggested?.clockText.orEmpty()) }
-    var hours by remember { mutableStateOf("") }
-    var firstTime by remember { mutableStateOf("") }
-    var start by remember { mutableStateOf(LocalDate.now().toString()) }
-    var end by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(existing?.name ?: draft?.name.orEmpty()) }
+    var dose by remember { mutableStateOf(existing?.dose ?: draft?.dose.orEmpty()) }
+    var instructions by remember { mutableStateOf(existing?.instructions ?: draft?.instructions.orEmpty()) }
+    var source by remember { mutableStateOf(existing?.source ?: draft?.source.orEmpty()) }
+    var kind by remember { mutableStateOf(existing?.kind ?: ScheduleKind.DAILY) }
+    var times by remember { mutableStateOf(existing?.times?.joinToString(", ") { it.format(clockFormat) } ?: suggested?.clockText.orEmpty()) }
+    var hours by remember { mutableStateOf(existing?.intervalHours?.toString().orEmpty()) }
+    var firstTime by remember { mutableStateOf(existing?.anchor?.atZone(ZoneId.systemDefault())?.format(clockFormat).orEmpty()) }
+    var start by remember { mutableStateOf((existing?.start ?: LocalDate.now()).toString()) }
+    var end by remember { mutableStateOf(existing?.end?.toString().orEmpty()) }
     var confirmed by remember { mutableStateOf(false) }
     var inputError by remember { mutableStateOf<PlanInputException?>(null) }
     var selectingTime by remember { mutableStateOf(false) }
@@ -44,10 +44,14 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
         Surface(Modifier.fillMaxWidth().fillMaxHeight(.96f).padding(horizontal = 10.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp), color = Paper) {
             Column {
                 Row(Modifier.fillMaxWidth().padding(start = 24.dp, top = 12.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (draft == null) "添加用药计划" else "核对医嘱草稿", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(if (existing != null) "编辑用药计划" else if (draft == null) "添加用药计划" else "核对医嘱草稿", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, "关闭") }
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    if (existing != null) {
+                        Text("修改后重新安排未来提醒，已登记的药名、剂量和时间仍保留在历史中。请结合今日实际记录核对新安排。", color = Muted, fontSize = 12.sp)
+                        if (!existing.enabled) Badge("已暂停 · 保存修改后仍保持暂停")
+                    }
                     draft?.let {
                         SoftCard {
                             Badge("GPT 整理 · 待你核对")
@@ -82,6 +86,7 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                         ScheduleKind.INTERVAL -> {
                             OutlinedTextField(hours, { hours = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("医嘱明确要求的间隔小时数") }, isError = inputError?.field == PlanInputField.INTERVAL_HOURS, singleLine = true)
                             OutlinedTextField(firstTime, { firstTime = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("开始日期的首次时间") }, placeholder = { Text("08:00") }, isError = inputError?.field == PlanInputField.FIRST_TIME, singleLine = true)
+                            existing?.anchor?.let { Text("原首次时刻：${it.atZone(ZoneId.systemDefault()).format(dateTimeFormat)}；未修改开始日期和首次钟点时保留原时刻。", color = Muted, fontSize = 12.sp) }
                             Text("间隔将跨午夜连续计算，不会每天重置。", color = Muted, fontSize = 12.sp)
                         }
                         ScheduleKind.AS_NEEDED -> Text("按需计划只提供手动记录，不主动提醒服用。", color = Muted, fontSize = 12.sp)
@@ -99,7 +104,7 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                 Button(enabled = confirmed && !saving, onClick = {
                     inputError = null
                     try {
-                        onSave(PlanInput(name, dose, instructions, source, kind, times, hours, firstTime, start, end).toPlan(ZoneId.systemDefault()))
+                        onSave(PlanInput(name, dose, instructions, source, kind, times, hours, firstTime, start, end).toPlan(ZoneId.systemDefault(), existing))
                     } catch (error: PlanInputException) { inputError = error }
                 }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 15.dp).height(50.dp)) { Text(if (saving) "正在保存…" else "确认并保存计划") }
             }

@@ -1,10 +1,14 @@
 package app.mediary.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import app.mediary.core.InstructionDraft
 import app.mediary.core.MedicationPlan
+import app.mediary.core.ScheduleKind
+import app.mediary.data.Snapshot
+import java.time.LocalDate
 import java.time.LocalTime
 import org.junit.Assert.*
 import org.junit.Rule
@@ -62,5 +66,30 @@ class PlanEditorTest {
         compose.onNode(isToggleable()).performScrollTo().performClick()
         compose.onNodeWithText("确认并保存计划").performClick()
         compose.runOnIdle { assertEquals(listOf(LocalTime.of(8, 0), LocalTime.NOON, LocalTime.of(18, 0)), saved!!.times) }
+    }
+
+    @Test fun medicineCabinetOpensPrefilledEditorAndSavesSamePausedPlan() {
+        var saved: MedicationPlan? = null
+        val original = MedicationPlan(name = "测试药", dose = "1片", kind = ScheduleKind.DAILY,
+            times = listOf(LocalTime.of(8, 0), LocalTime.of(18, 0)), start = LocalDate.now(), enabled = false)
+        compose.setContent {
+            var editing by remember { mutableStateOf(false) }
+            MaterialTheme {
+                PlansScreen(Snapshot(plans = listOf(original), loaded = true), {}, {}, {}, { editing = true })
+                if (editing) PlanEditor(null, false, null, { editing = false }, { saved = it }, existing = original)
+            }
+        }
+        compose.onNodeWithText("编辑计划").performScrollTo().performClick()
+        compose.onNodeWithText("编辑用药计划").assertIsDisplayed()
+        compose.onNode(hasSetTextAction() and hasText("药名")).assertTextContains("测试药")
+        compose.onNodeWithText("确认并保存计划").assertIsNotEnabled()
+        compose.onNode(hasSetTextAction() and hasText("已确认的提醒钟点")).performScrollTo().performTextReplacement("09:00,19:00")
+        compose.onNode(isToggleable()).performScrollTo().performClick()
+        compose.onNodeWithText("确认并保存计划").performClick()
+        compose.runOnIdle {
+            assertEquals(original.id, saved!!.id)
+            assertFalse(saved!!.enabled)
+            assertEquals(listOf(LocalTime.of(9, 0), LocalTime.of(19, 0)), saved!!.times)
+        }
     }
 }

@@ -60,6 +60,7 @@ fun MediaryApp(model: MediaryViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var editor by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<ImportDraft?>(null) }
+    var editingPlan by remember { mutableStateOf<MedicationPlan?>(null) }
     var inboxKey by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf(false) }
     var recordTarget by remember { mutableStateOf<Occurrence?>(null) }
@@ -81,7 +82,7 @@ fun MediaryApp(model: MediaryViewModel) {
                 }
             }
         }, floatingActionButton = {
-            if (tab <= 1) ExtendedFloatingActionButton(onClick = { draft = null; inboxKey = null; model.resetSaveError(); editor = true }, containerColor = Pine, contentColor = Color.White,
+            if (tab <= 1) ExtendedFloatingActionButton(onClick = { draft = null; editingPlan = null; inboxKey = null; model.resetSaveError(); editor = true }, containerColor = Pine, contentColor = Color.White,
                 icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("添加计划") })
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
@@ -92,7 +93,7 @@ fun MediaryApp(model: MediaryViewModel) {
                     Spacer(Modifier.width(10.dp))
                     Text("Mediary", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 26.sp, color = Ink)
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { model.resetImport(); importing = true }) { Icon(Icons.Outlined.AutoAwesome, "ChatGPT 草稿收件箱", tint = Pine) }
+                    IconButton(onClick = { importing = true }) { Icon(Icons.Outlined.AutoAwesome, "ChatGPT 草稿收件箱", tint = Pine) }
                 }
                 if (!reminderReady && tab != 3) TextButton(onClick = { tab = 3 }, modifier = Modifier.padding(horizontal = 20.dp)) {
                     Icon(Icons.Outlined.NotificationsActive, null, Modifier.size(16.dp), tint = Amber)
@@ -100,16 +101,15 @@ fun MediaryApp(model: MediaryViewModel) {
                 }
                 if (!snapshot.loaded) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 else when (tab) {
-                    0 -> TodayScreen(snapshot, now, { recordTarget = it }, { model.snooze(it) }, { tab = 3 }, { model.resetImport(); importing = true })
-                    1 -> PlansScreen(snapshot, model::toggle, model::recordAsNeeded, { draft = null; inboxKey = null; model.resetSaveError(); editor = true })
+                    0 -> TodayScreen(snapshot, now, { recordTarget = it }, { model.snooze(it) }, { tab = 3 }, { importing = true })
+                    1 -> PlansScreen(snapshot, model::toggle, model::recordAsNeeded, { draft = null; editingPlan = null; inboxKey = null; model.resetSaveError(); editor = true }, { selected -> draft = null; editingPlan = selected; inboxKey = null; model.resetSaveError(); editor = true })
                     2 -> HistoryScreen(snapshot, model::undo) { export.launch("mediary-${LocalDate.now()}.json") }
                     3 -> SettingsScreen(model) { export.launch("mediary-${LocalDate.now()}.json") }
                 }
             }
         }
-        if (importing) ImportSheet(model, onDismiss = { importing = false }, onReview = { selected, key -> draft = selected; inboxKey = key; model.resetSaveError(); editor = true }, onSettings = { importing = false; tab = 3 })
-        if (editor) PlanEditor(draft = draft, saving = saving, saveError = saveError, onDismiss = { if (!saving) editor = false }, onSave = { plan -> model.save(plan, inboxKey) {
-            draft?.let(model::markDraftSaved)
+        if (importing && !editor) McpInboxSheet(model, onDismiss = { importing = false }, onReview = { selected, key -> draft = selected; editingPlan = null; inboxKey = key; model.resetSaveError(); editor = true }, onSettings = { importing = false; tab = 3 })
+        if (editor) PlanEditor(draft = draft, existing = editingPlan, saving = saving, saveError = saveError, onDismiss = { if (!saving) editor = false }, onSave = { plan -> model.save(plan, inboxKey, editingPlan) {
             editor = false
         } })
         recordTarget?.let { target -> RecordDialog(target, onDismiss = { recordTarget = null }, onRecord = { action, actual -> model.record(target, action, actual); recordTarget = null }) }
@@ -222,7 +222,7 @@ fun scheduleLabel(plan: MedicationPlan): String = when (plan.kind) {
 }
 
 @Composable
-private fun PlansScreen(snapshot: Snapshot, toggle: (MedicationPlan) -> Unit, recordAsNeeded: (MedicationPlan) -> Unit, add: () -> Unit) {
+internal fun PlansScreen(snapshot: Snapshot, toggle: (MedicationPlan) -> Unit, recordAsNeeded: (MedicationPlan) -> Unit, add: () -> Unit, edit: (MedicationPlan) -> Unit) {
     var detail by remember { mutableStateOf<MedicationPlan?>(null) }
     var confirmAsNeeded by remember { mutableStateOf<MedicationPlan?>(null) }
     LazyColumn(contentPadding = PaddingValues(bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -242,11 +242,14 @@ private fun PlansScreen(snapshot: Snapshot, toggle: (MedicationPlan) -> Unit, re
             Text(plan.dose, fontSize = 14.sp)
             Text(scheduleLabel(plan), color = Muted, fontSize = 12.sp)
             Text("${plan.start} 至 ${plan.end?.toString() ?: "持续，遵医嘱调整"}", color = Muted, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalButton(onClick = { edit(plan) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("编辑计划") }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { toggle(plan) }) { Text(if (plan.enabled) "暂停计划" else "恢复计划") }
+            }
             Row {
                 TextButton(onClick = { detail = plan }) { Text("查看医嘱") }
-                Spacer(Modifier.weight(1f))
                 if (plan.kind == ScheduleKind.AS_NEEDED && plan.enabled) TextButton(onClick = { confirmAsNeeded = plan }) { Text("记一次") }
-                TextButton(onClick = { toggle(plan) }) { Text(if (plan.enabled) "暂停计划" else "恢复计划") }
             }
         } }
     }

@@ -8,6 +8,10 @@ import app.mediary.core.InstructionDraft
 import app.mediary.core.MedicationPlan
 import app.mediary.core.PlanInput
 import app.mediary.core.ScheduleKind
+import app.mediary.core.DoseEvent
+import app.mediary.core.DoseAction
+import app.mediary.core.Occurrence
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -72,5 +76,35 @@ class InboxRepositoryTest {
         val repo = open()
         assertEquals(1, repo.snapshot.value.plans.size); assertTrue(repo.snapshot.value.inbox.isEmpty())
         repo.mergeInbox(listOf(item)); assertEquals(1, repo.snapshot.value.plans.size)
+    }
+
+    @Test fun editRetainsHistoryAndInboxLinkButInvalidatesOldSnoozes() {
+        var repo = open()
+        repo.mergeInbox(listOf(item))
+        val original = plan().copy(kind = ScheduleKind.DAILY, times = listOf(LocalTime.of(8, 0), LocalTime.of(18, 0)))
+        repo.save(original, item.key)
+        val planned = Instant.now().minusSeconds(3600)
+        repo.record(DoseEvent(key = "${original.id}|$planned", planId = original.id, name = original.name,
+            dose = original.dose, plannedAt = planned, actualAt = planned, action = DoseAction.TAKEN))
+        val history = repo.snapshot.value.events
+        repo.snooze(Occurrence(original, planned.plusSeconds(1800)), Instant.now().plusSeconds(600))
+        val updated = original.copy(name = "测试药乙", dose = "每次2片", times = listOf(LocalTime.of(9, 0)))
+        assertEquals(1, repo.edit(original, updated).size)
+        repo.close(); repo = open()
+        assertEquals(listOf(updated), repo.snapshot.value.plans)
+        assertEquals(history, repo.snapshot.value.events)
+        assertEquals(original.id, repo.snapshot.value.inbox.single().localPlanId)
+        assertEquals(original.id, repo.pendingReceipts(account).single().localPlanId)
+        assertTrue(repo.snapshot.value.snoozes.isEmpty())
+    }
+
+    @Test fun staleEditsAndDuplicateNamesCannotOverwriteNewerPlans() {
+        val repo = open()
+        val original = plan(); repo.save(original)
+        val changed = original.copy(dose = "每次2片"); repo.edit(original, changed)
+        assertThrows(IllegalStateException::class.java) { repo.edit(original, original.copy(dose = "每次3片")) }
+        val other = plan().copy(name = "测试药乙"); repo.save(other)
+        assertThrows(IllegalArgumentException::class.java) { repo.edit(changed, changed.copy(name = other.name)) }
+        assertEquals(changed, repo.snapshot.value.plans.first { it.id == original.id })
     }
 }

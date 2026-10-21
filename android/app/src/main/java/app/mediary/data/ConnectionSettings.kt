@@ -6,7 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.content.edit
 import app.mediary.BuildConfig
-import app.mediary.core.GptConnectionRules
+import app.mediary.core.McpConnectionRules
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -15,65 +15,25 @@ import javax.crypto.spec.GCMParameterSpec
 
 class ConnectionSettings(context: Context, preferenceName: String = "connection") {
     private val preferences = context.getSharedPreferences(preferenceName, Context.MODE_PRIVATE)
-    // 已配置的旧连接保持原模式；首次使用直接展示锁定型号的智谱入口。
-    val mode: ImportMode get() = preferences.getString("mode", null)?.let { runCatching { ImportMode.valueOf(it) }.getOrNull() }
-        ?: when { preferences.contains("endpoint") -> ImportMode.RELAY; preferences.contains("apiKey") -> ImportMode.DIRECT; else -> ImportMode.ZHIPU }
-    val apiBaseUrl: String get() = preferences.getString("apiBaseUrl", "https://api.openai.com/v1")!!
-    val apiModel: String get() = preferences.getString("apiModel", "gpt-4.1-mini")!!
-    val apiKey: String get() = decrypt("apiKey", apiBaseUrl)
-    val endpoint: String get() = preferences.getString("endpoint", "http://127.0.0.1:8787")!!
-    val token: String get() = decrypt("token")
-    val zhipuKey: String get() = decrypt("zhipuKey", ZhipuFree.endpoint)
-    val mcpEndpoint: String get() = preferences.getString("mcpEndpoint", null) ?: endpoint
-    val mcpToken: String get() = if (preferences.contains("mcpToken")) decrypt("mcpToken", mcpEndpoint) else token
+    init {
+        // 升级只清理废弃模型设置；MCP 口令及其 Keystore 密钥必须保留。
+        preferences.edit {
+            listOf("mode", "apiBaseUrl", "apiModel", "apiKey", "zhipuKey").forEach { remove(it) }
+        }
+    }
+    val mcpEndpoint: String get() = preferences.getString("mcpEndpoint", null) ?: preferences.getString("endpoint", "")!!
+    val mcpToken: String get() = if (preferences.contains("mcpToken")) decrypt("mcpToken", mcpEndpoint) else decrypt("token")
 
-    fun mcp(): GptConnection = GptConnection(ImportMode.RELAY, mcpEndpoint, mcpToken)
+    fun mcp(): McpConnection = McpConnection(mcpEndpoint, mcpToken)
 
     fun saveMcp(endpoint: String, token: String) {
         val base = endpoint.trim().trimEnd('/')
         val secret = token.trim()
-        GptConnectionRules.validateEndpoint(base, allowLocalHttp = BuildConfig.DEBUG)
-        GptConnectionRules.validateSecret(secret)
+        McpConnectionRules.validateEndpoint(base, allowLocalHttp = BuildConfig.DEBUG)
+        McpConnectionRules.validateSecret(secret)
         require(secret.length >= 24) { "服务访问口令至少需要 24 位" }
         val encoded = encrypt(secret, base)
         preferences.edit { putString("mcpEndpoint", base); putString("mcpToken", encoded) }
-    }
-
-    fun clearDirectKey() { preferences.edit { remove("apiKey") } }
-    fun clearZhipuKey() { preferences.edit { remove("zhipuKey") } }
-
-    fun active(): GptConnection = when (mode) {
-        ImportMode.ZHIPU -> GptConnection(mode, ZhipuFree.endpoint, zhipuKey, ZhipuFree.model)
-        ImportMode.DIRECT -> GptConnection(mode, apiBaseUrl, apiKey, apiModel)
-        ImportMode.RELAY -> GptConnection(mode, endpoint, token)
-    }
-
-    fun saveZhipu(apiKey: String) {
-        val secret = apiKey.trim()
-        GptConnectionRules.validateSecret(secret)
-        val encoded = encrypt(secret, ZhipuFree.endpoint)
-        preferences.edit { putString("mode", ImportMode.ZHIPU.name); putString("zhipuKey", encoded) }
-    }
-
-    fun saveDirect(baseUrl: String, model: String, apiKey: String) {
-        val base = baseUrl.trim().trimEnd('/')
-        val name = model.trim()
-        val secret = apiKey.trim()
-        GptConnectionRules.validateEndpoint(base)
-        GptConnectionRules.validateModel(name)
-        GptConnectionRules.validateSecret(secret)
-        // 同一次保存原子写入地址、模型和密钥；密钥密文绑定地址，防止误配到其他提供方。
-        val encoded = encrypt(secret, base)
-        preferences.edit { putString("mode", ImportMode.DIRECT.name); putString("apiBaseUrl", base); putString("apiModel", name); putString("apiKey", encoded) }
-    }
-
-    fun saveRelay(endpoint: String, token: String) {
-        val base = endpoint.trim().trimEnd('/')
-        val secret = token.trim()
-        GptConnectionRules.validateEndpoint(base, allowLocalHttp = BuildConfig.DEBUG)
-        GptConnectionRules.validateSecret(secret)
-        val encoded = encrypt(secret)
-        preferences.edit { putString("mode", ImportMode.RELAY.name); putString("endpoint", base); putString("token", encoded) }
     }
 
     private fun decrypt(name: String, associatedAddress: String? = null): String = runCatching {

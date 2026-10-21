@@ -96,6 +96,27 @@ class MediaryRepository(context: Context, databaseName: String = "mediary.db") {
         refresh()
     }
 
+    /** 原计划未被其他操作修改时才更新；事件快照与草稿关联不参与覆盖。 */
+    @Synchronized fun edit(original: MedicationPlan, updated: MedicationPlan): List<SnoozedReminder> {
+        updated.validate()
+        require(original.id == updated.id) { "编辑不能改变计划标识" }
+        check(snapshot.value.plans.firstOrNull { it.id == original.id } == original) { "计划已发生变化，请关闭后重新打开编辑" }
+        require(snapshot.value.plans.none { it.id != updated.id && it.enabled && updated.enabled && it.name.trim().equals(updated.name.trim(), true) }) {
+            "已有同名启用计划，请先核对或暂停原计划"
+        }
+        val previousSnoozes = snapshot.value.snoozes.filter { it.planId == original.id }
+        val db = helper.writableDatabase
+        db.beginTransaction()
+        try {
+            check(db.update("plans", ContentValues().apply { put("content", encodePlan(updated).toString()) }, "id = ?", arrayOf(original.id)) == 1) { "原计划不存在，请重新打开药箱" }
+            // 修改后旧“稍后提醒”作废，不能再携带原剂量或原钟点；历史事件不删除。
+            db.delete("snoozes", "plan_id = ?", arrayOf(original.id))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        refresh()
+        return previousSnoozes
+    }
+
     @Synchronized fun mergeInbox(drafts: List<InboxDraft>) {
         val db = helper.writableDatabase
         db.beginTransaction()

@@ -2,17 +2,16 @@
 
 个人自用的安卓用药提醒与记录工具。把已确认的医嘱变成计划，留下每一次实际服药记录。
 
-默认在 ChatGPT 中整理医嘱，通过 MCP 保存待核对草稿，手机同步后核对并启用本地提醒，无需模型 API Key。已确认计划与服药历史仍在手机，本地提醒不依赖 GPT 或网络。原模型 API 直连保留为可选方式，PC 端留待后续。
+默认在 ChatGPT 中整理医嘱，通过 MCP 保存待核对草稿，手机同步后核对并启用本地提醒，无需模型 API Key。已确认计划与服药历史仍在手机，本地提醒不依赖 GPT 或网络。仅通过 MCP 连接 ChatGPT，PC 端留待后续。
 
 ## 已实现
 
 - **今日**：七日日期切换、按时间显示计划、服药登记、实际时间补录、跳过记录、稍后提醒。
-- **药箱**：手动添加、查看原文、暂停与恢复，支持每日固定钟点、固定小时间隔、按需记录；每天 2 次可选 08:00、18:00，每天 3 次可选 08:00、12:00、18:00，均为可调整的个人提醒预设，保存前需人工核对。支持钟点选择器和字段错误提示。
+- **药箱**：手动添加、编辑计划、查看原文、暂停与恢复，支持每日固定钟点、固定小时间隔、按需记录；每天 2 次可选 08:00、18:00，每天 3 次可选 08:00、12:00、18:00，均为可调整的个人提醒预设，保存前需人工核对。支持钟点选择器和字段错误提示。
 - **记录**：保存计划时间、实际时间、药名和剂量快照；撤销通过追加事件实现；导出完整 JSON。
 - **本地提醒**：系统 AlarmManager、通知操作按钮、权限检查、15 秒测试提醒；重启与时区变化后重排。
 - **ChatGPT 草稿**：OAuth 授权的 MCP 工具创建、读取草稿 → 手机同步收件箱 → 本机原文证据校验 → 人工设置时间并保存计划。持久化草稿、重复创建去重、离线回执重试。
-- **可选 API 导入**：保留智谱固定型号、其他 Responses API 与自有整理中转；默认界面不要求模型密钥。
-- **隐私**：计划和服药历史保存在本机，不上传至 MCP；草稿原文由你主动提供给 ChatGPT 并保存在自有服务。服务口令与可选 API 密钥在手机加密保存，不随 APK 分发、不包含在导出中。
+- **隐私**：计划和服药历史保存在本机，不上传至 MCP；草稿原文由你主动提供给 ChatGPT 并保存在自有服务。服务口令在手机加密保存，不随 APK 分发、不包含在导出中。
 
 应用不附带真实药物示例，不自动创建任何服药计划。当前支持草稿同步，暂不支持服药历史云同步、照片识别、PC 客户端和备份文件一键恢复。
 
@@ -26,10 +25,10 @@
 
 ```text
 android/
-  app/                 Compose 页面、SQLite 本地存储、系统通知、GPT 导入客户端
+  app/                 Compose 页面、SQLite 本地存储、系统通知、MCP 草稿同步客户端
   core/                纯 Kotlin 排程规则、医嘱原文校验与单元测试
 server/
-  src/                 个人 MCP/OAuth 草稿服务与可选 AI 整理中转
+  src/                 个人 MCP/OAuth 草稿服务
   test/                原文证据校验与 HTTP 集成测试
 docs/
   architecture.md      时间、记录与 AI 边界说明
@@ -55,7 +54,7 @@ Set-Location android
 
 开发调试包只用于开发验证；日常使用请下载 Release 正式包。最低 Android 8.0（API 26），目标 API 35。
 
-连接一部已授权 USB 调试的手机后，可以在仓库根目录运行 `./scripts/install.ps1` 安装并打开正式包；独立开发版使用 `-Variant Debug`。多部手机时使用 `-Serial <设备ID>` 指定。手机直连 GPT 不需要 USB；仅在调试可选本机整理服务时使用 `-Variant Debug -ConnectGptService` 设置 USB 反向连接。
+连接一部已授权 USB 调试的手机后，可以在仓库根目录运行 `./scripts/install.ps1` 安装并打开正式包；独立开发版使用 `-Variant Debug`。多部手机时使用 `-Serial <设备ID>` 指定。日常通过 MCP 同步不需要 USB；仅在调试本机 MCP 服务时使用 `-Variant Debug -ConnectMcpService` 设置 USB 反向连接。
 
 如果开发者选项的厂商菜单入口不可见，可以先通过文件传输将 APK 复制到手机安装，再在 Mediary 的 **设置 → 打开开发者选项** 中跳转系统页面。这个快捷入口仅在开发调试包显示，不会自动改变系统开关。
 
@@ -72,7 +71,7 @@ OPPO Find N5 / ColorOS V16.1.0 真机曾在默认耗电策略下推迟后台测�
 
 入口是否出现取决于 ChatGPT 账号、工作区和客户端。部署服务不等于某个 Plus 账号已经接入；没有创建入口时请先保留手动计划，勿关闭鉴权。当前 MCP 工具只处理草稿及手机回执，不能直接启用提醒或读写手机服药记录。
 
-完整接入方式、工具范围及验收见 [MCP 接入说明](docs/mcp.md)。原智谱、Responses API 和整理中转保留在 **设置 → 可选：模型 API 直连与整理服务**，只在使用这些可选方式时才需要对应 API Key。
+完整接入方式、工具范围及验收见 [MCP 接入说明](docs/mcp.md)。应用和服务均不再提供模型 API 直连或整理中转。
 
 ## 用药计划与记录规则
 
@@ -83,7 +82,7 @@ OPPO Find N5 / ColorOS V16.1.0 真机曾在默认耗电策略下推迟后台测�
 - “稍后提醒”延后通知 10 分钟，不改变原始计划时间。等待中的稍后提醒会持久化，重启后只恢复尚未到期的提醒。
 - 重启、恢复计划或更改时间后只安排未来剂次，不集中补发过去的提醒。
 - “未记录”不是“漏服”。通知送达也不等于实际服用。
-- 改变医嘱时先暂停原计划，再新增核对后的计划；历史药名和剂量快照不会随新计划改变。
+- 修改计划：**药箱 → 对应药物的「编辑计划」→ 调整并核对 → 确认并保存计划**。保留计划标识和暂停状态，只重新安排未来提醒、取消该计划原来的稍后提醒和已显示通知；历史药名、剂量和时间快照保持原样。今日安排会按新规则展示，请结合实际记录核对，避免重复登记。
 - 卸载会清除本机数据。导出的 JSON 含完整计划与操作历史，当前尚未实现一键恢复，请妥善保存导出文件。
 
 ## 验证
@@ -95,18 +94,17 @@ cd ../android
 .\gradlew.bat :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-安卓与可选服务测试使用可控的上游响应，验证请求格式、凭据边界、原文证据、缺失字段、拒绝与异常；不消耗真实 API 调用。安卓真机运行 `ConnectionSettingsTest` 与 `InboxRepositoryTest`，使用独立临时偏好文件和数据库，验证加密、迁移与离线去重。真实 AI 联调需用户在手机或自有服务器填写对应密钥，通知送达需连接真机验证。
+测试验证 MCP/OAuth 权限、原文证据、缺失字段与异常处理，不调用模型 API。安卓真机使用独立临时偏好文件和数据库，验证口令加密、旧配置清理、草稿去重和编辑后的历史保留；UI 测试验证编辑入口、预填和人工确认。实际 ChatGPT 接入与通知送达仍需端到端和真机验证。
 
 更多验收步骤见 [真机检查](docs/device-checklist.md)。
 
 ## GitHub Actions
 
-推送 `main`、提交 PR 或手动运行时，会检查服务端测试、Docker 镜像构建，以及安卓测试、APK 编译和 Lint。`main` 的检查全部通过且仓库变量 `DEPLOY_ENABLED=true` 时，自动通过 SSH 更新自有服务器；PR 不部署。连接凭据使用 GitHub Actions Secrets，提供方 API Key 只保留在服务器的共享 `.env`，不随代码上传。
+推送 `main`、提交 PR 或手动运行时，会检查服务端测试、Docker 镜像构建，以及安卓测试、APK 编译和 Lint。`main` 的检查全部通过且仓库变量 `DEPLOY_ENABLED=true` 时，自动通过 SSH 更新自有服务器；PR 不部署。连接凭据使用 GitHub Actions Secrets，服务口令只保留在服务器的共享 `.env` 和手机加密存储，不随代码上传。
 
 初次准备、Secrets 配置、发布目录及失败恢复见 [Actions 部署说明](server/README.md#github-actions-自动部署)。
 
 ## 实现参考
 
 - [Android 系统闹钟](https://developer.android.com/develop/background-work/services/alarms)
-- [OpenAI Responses API](https://developers.openai.com/api/reference/responses/overview)
-- [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses)
+- [MCP 规范](https://modelcontextprotocol.io/specification)

@@ -29,7 +29,7 @@ object McpClient {
         require(id.matches(Regex("[0-9a-fA-F-]{36}"))) { "草稿标识无效，请检查服务版本" }
         val source = item.getString("sourceText")
         require(source.isNotBlank() && source.length <= 12_000) { "草稿原文格式异常" }
-        val draft = ExtractionProtocol.readDrafts(JSONObject().put("medications", JSONArray().put(item.getJSONObject("medication"))).toString(), source).single()
+        val draft = DraftProtocol.readDrafts(JSONObject().put("medications", JSONArray().put(item.getJSONObject("medication"))).toString(), source).single()
         val created = item.getString("createdAt")
         Instant.parse(created)
         return InboxDraft(id, account, source, draft, created, !item.isNull("reviewedAt"))
@@ -46,10 +46,10 @@ object McpClient {
         return InboxPage(drafts, cursor)
     }
 
-    fun page(profile: GptConnection, after: Long): InboxPage = decodePage(
+    fun page(profile: McpConnection, after: Long): InboxPage = decodePage(
         request(profile, "/v1/drafts?after=$after&limit=20"), profile.endpoint, after)
 
-    fun receipt(profile: GptConnection, drafts: List<InboxDraft>) {
+    fun receipt(profile: McpConnection, drafts: List<InboxDraft>) {
         // 空列表也是手机完成同步的回执，不能让空收件箱一直显示为未连接。
         require(drafts.size <= 50 && drafts.all { it.account == profile.endpoint }) { "草稿所属服务不匹配，请核对连接设置" }
         val items = JSONArray(drafts.map { draft -> JSONObject().put("id", draft.id).apply { draft.localPlanId?.let { put("planId", it) } } })
@@ -57,10 +57,9 @@ object McpClient {
     }
 
     /** 口令只发到已保存的服务地址，拒绝重定向；错误消息不显示服务器回传的医嘱或凭据。 */
-    internal fun request(profile: GptConnection, path: String, body: JSONObject? = null,
+    internal fun request(profile: McpConnection, path: String, body: JSONObject? = null,
         open: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }): String {
         profile.validate()
-        require(profile.mode == ImportMode.RELAY) { "请选择 Mediary 服务连接" }
         val connection = open(URI(profile.endpoint.trimEnd('/') + path).toURL())
         try {
             connection.requestMethod = if (body == null) "GET" else "POST"
