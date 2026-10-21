@@ -95,7 +95,14 @@ test('discovered scopes request renewable access while a client can still choose
   assert.deepEqual(metadata.scopes_supported, ['drafts:read', 'drafts:write', 'offline_access']);
   const challenge = await fetch(`${url}/mcp`);
   assert.ok(challenge.headers.get('www-authenticate').includes('scope="drafts:read drafts:write offline_access"'));
-  const renewable = await authorize(url, metadata.scopes_supported.join(' '));
+  const tools = (await (await rpc(url, owner, 'tools/list')).json()).result.tools;
+  for (const tool of tools) {
+    assert.equal(tool.securitySchemes[0].scopes.includes('offline_access'), true);
+    assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
+  }
+  const requested = [...new Set(tools.flatMap(tool => tool.securitySchemes[0].scopes))];
+  assert.deepEqual(requested.slice().sort(), metadata.scopes_supported.slice().sort());
+  const renewable = await authorize(url, requested.join(' '));
   assert.equal(typeof renewable.refresh_token, 'string'); assert.equal(renewable.expires_in, 3600);
   const limited = await authorize(url, 'drafts:read');
   assert.equal(limited.refresh_token, undefined); assert.equal(limited.scope, 'drafts:read');

@@ -12,7 +12,8 @@ const tools = [
   { name: names[2], title: '读取一条用药草稿', description: '根据草稿 ID 读取原文、待核对字段和手机回执，不能启用提醒。', inputSchema: { ...objectSchema({ id: { type: 'string', format: 'uuid' } }), required: ['id'] } },
   { name: names[3], title: '查看手机同步状态', description: '返回最后一次手机主动同步的服务器时间和待核对数量；离线手机上的状态未知。不把没有服药记录解释成未服用。', inputSchema: objectSchema({}) },
 ].map((tool, index) => {
-  const securitySchemes = [{ type: 'oauth2', scopes: [index === 0 ? 'drafts:write' : 'drafts:read'] }];
+  // ChatGPT 会按工具声明申请权限；仅在发现元数据中列出刷新权限不会建立可续期连接。
+  const securitySchemes = [{ type: 'oauth2', scopes: [index === 0 ? 'drafts:write' : 'drafts:read', 'offline_access'] }];
   return { ...tool, annotations: { readOnlyHint: index !== 0, destructiveHint: false, idempotentHint: true, openWorldHint: false }, securitySchemes, _meta: { securitySchemes } };
 });
 

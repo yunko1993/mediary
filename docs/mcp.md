@@ -53,7 +53,7 @@ MCP 使用无会话 Streamable HTTP，可协商 `2025-03-26` / `2025-06-18`，PO
 
 OAuth 支持 DCR、授权码 + S256 PKCE、resource audience、scope、一次性授权码、刷新令牌轮换与撤销。access token 默认 1 小时，申请 `offline_access` 后 refresh token 最长 30 天。授权页带 CSRF、短期一次性表单及防嵌套策略。当前只允许 `https://chatgpt.com/connector_platform_oauth_redirect` 和 `https://chatgpt.com/connector/oauth/<callback_id>` 两类精确格式回调。客户端注册只接受 public client (`none`)，不支持 CIMD 或第三方登录账号。
 
-资源元数据和登录挑战同时列出 `offline_access`，便于客户端申请保持连接；授权页会说明是否允许自动续期。客户端仍可显式只申请读或写权限，未申请刷新权限时不会暗中签发刷新令牌。更改发现配置不会扩大已有授权；旧的一小时连接需重新授权后才能取得刷新凭据。
+资源元数据、每个工具的 OAuth 声明及登录挑战同时列出 `offline_access`，便于 ChatGPT 申请保持连接；仅修改发现元数据时，实际客户端仍可能只申请工具声明中的草稿读写权限。授权页会说明是否允许自动续期。其他客户端仍可显式只申请读或写权限，未申请刷新权限时不会暗中签发刷新令牌。更改发现配置不会扩大已有授权；旧的一小时连接需刷新工具信息并重新授权后才能取得刷新凭据。
 
 授权表单的 `form-action` 同时允许本站和本次已验证的 ChatGPT 回调；Chromium 可能用该策略检查表单提交后的 303 跳转。仅设置 `'self'` 会导致密码已提交、授权码已生成，却无法回到 ChatGPT，看起来仍停留在输入框。不能删除整条 CSP 或放行任意 HTTPS 地址；回调仍须经过注册白名单、精确 URI 匹配、state 和 PKCE 校验。普通 HTTP 自测不会执行浏览器 CSP，需另外验证实际表单导航。
 
