@@ -36,8 +36,9 @@ export function mcpRoutes(config, store, readBody, diagnosticSink) {
       if (request.method === 'GET') {
         const form = oauth.form(url.searchParams);
         // no-referrer 会让浏览器表单发送 Origin:null；same-origin 保留本站来源，跨站仍不发送 Referer。
+        // Chromium 还会用 form-action 检查提交后的 303；仅放行本次已验证的 ChatGPT 回调。
         response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': form.cookie, 'Cache-Control': 'no-store', 'Referrer-Policy': 'same-origin',
-          'Content-Security-Policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff' });
+          'Content-Security-Policy': `default-src 'none'; form-action 'self' ${form.redirectUri}; frame-ancestors 'none'; base-uri 'none'`, 'X-Content-Type-Options': 'nosniff' });
         response.end(form.html); return true;
       }
       if (request.method === 'POST') {

@@ -49,6 +49,7 @@ async function authorize(url, scope = 'drafts:read drafts:write offline_access')
   const page = await fetch(`${url}/oauth/authorize?${query}`);
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/u);
+  assert.ok(page.headers.get('content-security-policy').includes(`form-action 'self' ${client.redirect_uris[0]};`));
   assert.equal(page.headers.get('referrer-policy'), 'same-origin');
   const html = await page.text();
   const ticket = /name="ticket" value="([^"]+)"/u.exec(html)[1];
@@ -86,6 +87,22 @@ test('MCP-only health and discovery work without an AI key; medical data require
   const metadata = await (await fetch(`${url}/.well-known/oauth-authorization-server`)).json();
   assert.deepEqual(metadata.code_challenge_methods_supported, ['S256']); assert.ok(metadata.scopes_supported.includes('offline_access'));
   assert.equal((await (await fetch(`${url}/.well-known/oauth-protected-resource`)).json()).resource, resource);
+}));
+
+test('authorization CSP permits only self and the exact registered callback for either ChatGPT callback format', async () => service(async url => {
+  for (const redirect of ['https://chatgpt.com/connector_platform_oauth_redirect', 'https://chatgpt.com/connector/oauth/test_callback_123']) {
+    const registered = await fetch(`${url}/oauth/register`, { method: 'POST', headers,
+      body: JSON.stringify({ redirect_uris: [redirect], token_endpoint_auth_method: 'none' }) });
+    const client = await registered.json();
+    const query = new URLSearchParams({ client_id: client.client_id, redirect_uri: redirect, state: 'csp-test-state', resource,
+      response_type: 'code', code_challenge_method: 'S256', code_challenge: 'c'.repeat(43) });
+    const page = await fetch(`${url}/oauth/authorize?${query}`);
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('content-security-policy'), `default-src 'none'; form-action 'self' ${redirect}; frame-ancestors 'none'; base-uri 'none'`);
+    await page.text();
+    query.set('redirect_uri', 'https://chatgpt.com/connector/oauth/different_callback');
+    assert.equal((await fetch(`${url}/oauth/authorize?${query}`)).status, 400);
+  }
 }));
 
 test('anonymous clients discover OAuth tools and receive login challenges without reading or creating data', async () => service(async (url, store) => {

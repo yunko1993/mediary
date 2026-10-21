@@ -51,6 +51,8 @@ MCP 使用无会话 Streamable HTTP，可协商 `2025-03-26` / `2025-06-18`，PO
 
 OAuth 支持 DCR、授权码 + S256 PKCE、resource audience、scope、一次性授权码、刷新令牌轮换与撤销。access token 默认 1 小时，申请 `offline_access` 后 refresh token 最长 30 天。授权页带 CSRF、短期一次性表单及防嵌套策略。当前只允许 `https://chatgpt.com/connector_platform_oauth_redirect` 和 `https://chatgpt.com/connector/oauth/<callback_id>` 两类精确格式回调。客户端注册只接受 public client (`none`)，不支持 CIMD 或第三方登录账号。
 
+授权表单的 `form-action` 同时允许本站和本次已验证的 ChatGPT 回调；Chromium 可能用该策略检查表单提交后的 303 跳转。仅设置 `'self'` 会导致密码已提交、授权码已生成，却无法回到 ChatGPT，看起来仍停留在输入框。不能删除整条 CSP 或放行任意 HTTPS 地址；回调仍须经过注册白名单、精确 URI 匹配、state 和 PKCE 校验。普通 HTTP 自测不会执行浏览器 CSP，需另外验证实际表单导航。
+
 持久化文件只保存 OAuth 令牌摘要，草稿医嘱以明文保存在私有 Docker 数据卷中（文件权限 0600），并非端到端加密。不要把数据卷、备份或手机数据库上传到仓库。服务启动时如果数据损坏会失败，不会悄悄建立空库覆盖历史。当前是单进程、单用户实现，最多 1000 条草稿、500 个客户端和 500 个有效授权，数据文件上限 32 MiB；尚无自动清理或多实例共享数据库。
 
 停用连接可在 ChatGPT 断开，并调用标准 OAuth 撤销接口；更换服务访问口令会使旧 OAuth 授权失效，手机也需要更新口令。更换公开基础地址后需要重新连接授权。
