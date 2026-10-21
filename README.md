@@ -7,7 +7,7 @@
 ## 已实现
 
 - **今日**：七日日期切换、按时间显示计划、服药登记、实际时间补录、跳过记录、稍后提醒。
-- **药箱**：手动添加、查看原文、暂停与恢复，支持每日固定钟点、固定小时间隔、按需记录。
+- **药箱**：手动添加、查看原文、暂停与恢复，支持每日固定钟点、固定小时间隔、按需记录；可通过钟点选择器添加每日提醒，保存校验会指出具体缺失或格式错误的字段。
 - **记录**：保存计划时间、实际时间、药名和剂量快照；撤销通过追加事件实现；导出完整 JSON。
 - **本地提醒**：系统 AlarmManager、通知操作按钮、权限检查、15 秒测试提醒；重启与时区变化后重排。
 - **ChatGPT 草稿**：OAuth 授权的 MCP 工具创建、读取草稿 → 手机同步收件箱 → 本机原文证据校验 → 人工设置时间并保存计划。持久化草稿、重复创建去重、离线回执重试。
@@ -45,7 +45,7 @@ Set-Location android
 .\gradlew.bat :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-`scripts/build.ps1` 可在仓库根目录执行相同检查，并将 APK 放入 `outputs/mediary-0.2.0-debug.apk`。如果本机使用自动准备的工具，SDK 位于 `work/tools/android-sdk`，Gradle 缓存在 `work/gradle-home`。这些本机依赖不提交 Git。
+`scripts/build.ps1` 可在仓库根目录执行相同检查，并将 APK 放入 `outputs/mediary-0.2.1-debug.apk`。如果本机使用自动准备的工具，SDK 位于 `work/tools/android-sdk`，Gradle 缓存在 `work/gradle-home`。这些本机依赖不提交 Git。
 
 APK 为开发调试包，适合自用验证。最低 Android 8.0（API 26），目标 API 35。
 

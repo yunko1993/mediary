@@ -6,8 +6,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.mediary.core.InstructionDraft
 import app.mediary.core.MedicationPlan
+import app.mediary.core.PlanInput
 import app.mediary.core.ScheduleKind
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.util.UUID
 import org.junit.After
 import org.junit.Before
@@ -42,6 +45,19 @@ class InboxRepositoryTest {
         val pending = repo.pendingReceipts(account)
         assertEquals(1, pending.size); assertTrue(repo.pendingReceipts("https://other.example.invalid").isEmpty())
         repo.acknowledgeReceipts(pending); assertTrue(repo.pendingReceipts(account).isEmpty())
+    }
+
+    @Test fun confirmedDailyClockPersistsWithDraftAcrossRestart() {
+        var repo = open()
+        val source = "测试药甲，每次1片，每天08:00和18:00。"
+        val daily = item.copy(sourceText = source, draft = item.draft.copy(frequency = "每天08:00和18:00", source = source))
+        repo.mergeInbox(listOf(daily))
+        val saved = PlanInput(name = daily.draft.name, dose = daily.draft.dose, times = "8：00，18:00", start = "2026-10-21").toPlan(ZoneId.of("Asia/Shanghai"))
+        repo.save(saved, daily.key)
+        repo.close(); repo = open()
+        assertEquals(listOf(LocalTime.of(8, 0), LocalTime.of(18, 0)), repo.snapshot.value.plans.single().times)
+        assertEquals(saved.id, repo.snapshot.value.inbox.single().localPlanId)
+        assertEquals(saved.id, repo.pendingReceipts(account).single().localPlanId)
     }
 
     @Test fun versionOneMigrationPreservesExistingPlanAndDoesNotCreateReminders() {
