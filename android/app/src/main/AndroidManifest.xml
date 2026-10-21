@@ -10,7 +10,8 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="Mediary"
-        android:icon="@drawable/ic_mediary"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Mediary"
         android:networkSecurityConfig="@xml/network_security_config">

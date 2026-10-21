@@ -25,12 +25,13 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismiss: () -> Unit, onSave: (MedicationPlan) -> Unit) {
+    val suggested = remember(draft) { DailyTimePresets.forDraft(draft?.frequency.orEmpty(), draft?.source.orEmpty()) }
     var name by remember { mutableStateOf(draft?.name.orEmpty()) }
     var dose by remember { mutableStateOf(draft?.dose.orEmpty()) }
     var instructions by remember { mutableStateOf(draft?.instructions.orEmpty()) }
     var source by remember { mutableStateOf(draft?.source.orEmpty()) }
     var kind by remember { mutableStateOf(ScheduleKind.DAILY) }
-    var times by remember { mutableStateOf("") }
+    var times by remember { mutableStateOf(suggested?.clockText.orEmpty()) }
     var hours by remember { mutableStateOf("") }
     var firstTime by remember { mutableStateOf("") }
     var start by remember { mutableStateOf(LocalDate.now().toString()) }
@@ -53,7 +54,7 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                             Text("频次原文：${it.frequency.ifBlank { "未提供" }}", fontSize = 13.sp)
                             Text("疗程原文：${it.duration.ifBlank { "未提供" }}", fontSize = 13.sp)
                             if (it.missing.isNotEmpty()) Text("需补充确认：${it.missing.joinToString("、")}", color = Amber, fontSize = 12.sp)
-                            Text("提醒钟点和日期需要你按已确认医嘱填写，不会由 GPT 自动猜测。", color = Muted, fontSize = 12.sp)
+                            Text("常用钟点是你的提醒偏好，保存前仍需核对；原文有具体时间或服用条件时请按原文调整。", color = Muted, fontSize = 12.sp)
                         }
                     }
                     OutlinedTextField(name, { name = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("药名") }, isError = inputError?.field == PlanInputField.NAME, singleLine = true)
@@ -67,6 +68,13 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                     }
                     when (kind) {
                         ScheduleKind.DAILY -> {
+                            Text("常用钟点", fontWeight = FontWeight.Medium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                DailyTimePreset.entries.forEach { preset ->
+                                    FilterChip(selected = times == preset.clockText, onClick = { times = preset.clockText; edited() }, label = { Text("每天${preset.count}次") })
+                                }
+                            }
+                            Text("2次：08:00、18:00\n3次：08:00、12:00、18:00", color = Muted, fontSize = 12.sp)
                             OutlinedTextField(times, { times = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("已确认的提醒钟点") }, placeholder = { Text("08:00, 18:00") }, isError = inputError?.field == PlanInputField.TIMES,
                                 supportingText = { Text("必填，可选择或手动输入；多个钟点用逗号分隔。每日几次不自动等同每隔几小时。") })
                             OutlinedButton(onClick = { selectingTime = true }) { Text("选择钟点") }

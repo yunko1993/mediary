@@ -15,7 +15,7 @@ class PlanEditorTest {
 
     @Test fun missingClockShowsSpecificErrorAndConfirmedClockCanBeSaved() {
         var saved: MedicationPlan? = null
-        val draft = InstructionDraft("测试药", "1片", "每日2次", "", "", "测试药，每次1片，每日2次。", emptyList())
+        val draft = InstructionDraft("测试药", "1片", "", "", "", "测试药，每次1片。", emptyList())
         compose.setContent { MaterialTheme { PlanEditor(draft, false, null, {}, { saved = it }) } }
 
         compose.onNode(isToggleable()).performScrollTo().performClick()
@@ -41,5 +41,26 @@ class PlanEditorTest {
         compose.onNode(isToggleable()).performScrollTo().performClick()
         compose.onNodeWithText("确认并保存计划").performClick()
         compose.runOnIdle { assertEquals(listOf(LocalTime.of(8, 0)), saved!!.times) }
+    }
+
+    @Test fun dailyFrequencyPrefillsEditableClockAndStillRequiresConfirmation() {
+        var saved: MedicationPlan? = null
+        val draft = InstructionDraft("测试药", "1片", "每天2次", "", "", "测试药，每次1片，每天2次。", emptyList())
+        compose.setContent { MaterialTheme { PlanEditor(draft, false, null, {}, { saved = it }) } }
+        compose.onNodeWithText("确认并保存计划").assertIsNotEnabled()
+        compose.onNode(hasSetTextAction() and hasText("已确认的提醒钟点")).performScrollTo().assertTextContains("08:00, 18:00")
+        compose.onNode(isToggleable()).performScrollTo().performClick()
+        compose.onNodeWithText("确认并保存计划").performClick()
+        compose.runOnIdle { assertEquals(listOf(LocalTime.of(8, 0), LocalTime.of(18, 0)), saved!!.times) }
+    }
+
+    @Test fun threeTimesPresetNeedsNoClockTyping() {
+        var saved: MedicationPlan? = null
+        val draft = InstructionDraft("测试药", "1片", "每日三次", "", "", "测试药，每次1片，每日三次。", emptyList())
+        compose.setContent { MaterialTheme { PlanEditor(draft, false, null, {}, { saved = it }) } }
+        compose.onNodeWithText("每天3次").performScrollTo().performClick()
+        compose.onNode(isToggleable()).performScrollTo().performClick()
+        compose.onNodeWithText("确认并保存计划").performClick()
+        compose.runOnIdle { assertEquals(listOf(LocalTime.of(8, 0), LocalTime.NOON, LocalTime.of(18, 0)), saved!!.times) }
     }
 }
