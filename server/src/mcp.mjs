@@ -62,7 +62,7 @@ export function mcpRoutes(config, store, readBody, diagnosticSink) {
       }
     }
     if (path === '/mcp') {
-      const challenge = `Bearer resource_metadata="${config.publicBaseUrl}/.well-known/oauth-protected-resource", scope="drafts:read drafts:write"`;
+      const challenge = `Bearer resource_metadata="${config.publicBaseUrl}/.well-known/oauth-protected-resource", scope="drafts:read drafts:write offline_access"`;
       const version = request.headers['mcp-protocol-version'];
       if (request.method !== 'POST') {
         if (!oauth.access(request.headers.authorization, 'drafts:read') && !oauth.access(request.headers.authorization, 'drafts:write')) {
@@ -98,7 +98,8 @@ export function mcpRoutes(config, store, readBody, diagnosticSink) {
       const needed = name === names[0] ? 'drafts:write' : 'drafts:read';
       if (!oauth.access(request.headers.authorization, needed)) {
         const hasGrant = oauth.access(request.headers.authorization, 'drafts:read') || oauth.access(request.headers.authorization, 'drafts:write');
-        const authChallenge = `Bearer resource_metadata="${config.publicBaseUrl}/.well-known/oauth-protected-resource", scope="${needed}", error="${hasGrant ? 'insufficient_scope' : 'invalid_token'}", error_description="Connect Mediary to authorize this tool"`;
+        // 刷新权限需由客户端显式申请；否则首次连接一小时后只能再次输入口令。
+        const authChallenge = `Bearer resource_metadata="${config.publicBaseUrl}/.well-known/oauth-protected-resource", scope="${needed} offline_access", error="${hasGrant ? 'insufficient_scope' : 'invalid_token'}", error_description="Connect Mediary to authorize this tool"`;
         // ChatGPT 需要工具结果中的标准挑战才能弹出连接入口；拒绝时不读取状态，也不写入草稿。
         response.setHeader('WWW-Authenticate', authChallenge);
         result({ isError: true, content: [{ type: 'text', text: '请先连接并授权 Mediary；此次没有读取或保存用药数据。' }],

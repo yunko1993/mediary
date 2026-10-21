@@ -31,6 +31,8 @@ Quick Tunnel 的域名随进程重新创建而变化，没有可用性保证，�
 
 如果 ChatGPT 回复“当前工具列表中没有找到 get_sync_status”，这不是接口返回的错误，不能据此判断口令无效。先在 Plugins 的 Mediary 详情页核对 MCP 地址是否指向当前部署的 `/mcp`，选择 Refresh／刷新，并检查下面四个工具均已发现、需要的工具已启用，再开新对话通过 `@` 选择该连接。安装了旧地址或同名连接时，应按地址辨认；刷新工具信息不需要删除手机数据。若刷新报错，保留具体错误，先排查发现阶段，不反复更改 OAuth 逻辑。参见 [官方刷新流程](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata)。
 
+“认证成功，但 action discovery failed”时尤其要检查完整地址：站点根地址的 well-known 可以完成 OAuth，但工具传输在 `/mcp`；把根地址直接填为 MCP Server URL 会让工具发现请求返回 404。手机连接设置使用基础地址，ChatGPT 服务器设置使用带 `/mcp` 的完整地址。
+
 | 工具 | 用途 |
 | --- | --- |
 | `create_medication_draft` | 保存一种药物的待核对草稿，必须带原文、逐字段引文和幂等 requestId |
@@ -50,6 +52,8 @@ Quick Tunnel 的域名随进程重新创建而变化，没有可用性保证，�
 MCP 使用无会话 Streamable HTTP，可协商 `2025-03-26` / `2025-06-18`，POST 返回 JSON；GET 未授权返回 401，有有效令牌时返回 405。支持 `initialize`、`ping`、`tools/list`、`tools/call` 与通知，不提供旧版 SSE 长连接。初始化和工具目录只暴露公开协议资料，可匿名访问；四个工具均声明 OAuth，调用时仍验证令牌、权限和资源绑定。未授权、令牌过期或权限不足时返回 `isError` 与 `_meta["mcp/www_authenticate"]`，包含资源元数据地址、所需 scope、error 和 error_description，让 ChatGPT 能在聊天中触发连接界面；拒绝时不读取状态或读写草稿。手机 REST 只接受服务访问口令，OAuth 令牌不能伪造手机确认。
 
 OAuth 支持 DCR、授权码 + S256 PKCE、resource audience、scope、一次性授权码、刷新令牌轮换与撤销。access token 默认 1 小时，申请 `offline_access` 后 refresh token 最长 30 天。授权页带 CSRF、短期一次性表单及防嵌套策略。当前只允许 `https://chatgpt.com/connector_platform_oauth_redirect` 和 `https://chatgpt.com/connector/oauth/<callback_id>` 两类精确格式回调。客户端注册只接受 public client (`none`)，不支持 CIMD 或第三方登录账号。
+
+资源元数据和登录挑战同时列出 `offline_access`，便于客户端申请保持连接；授权页会说明是否允许自动续期。客户端仍可显式只申请读或写权限，未申请刷新权限时不会暗中签发刷新令牌。更改发现配置不会扩大已有授权；旧的一小时连接需重新授权后才能取得刷新凭据。
 
 授权表单的 `form-action` 同时允许本站和本次已验证的 ChatGPT 回调；Chromium 可能用该策略检查表单提交后的 303 跳转。仅设置 `'self'` 会导致密码已提交、授权码已生成，却无法回到 ChatGPT，看起来仍停留在输入框。不能删除整条 CSP 或放行任意 HTTPS 地址；回调仍须经过注册白名单、精确 URI 匹配、state 和 PKCE 校验。普通 HTTP 自测不会执行浏览器 CSP，需另外验证实际表单导航。
 

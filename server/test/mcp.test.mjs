@@ -24,7 +24,7 @@ async function needsOAuth(response, error = 'invalid_token', scope = 'drafts:rea
   assert.equal(result.structuredContent, undefined);
   const challenge = result._meta['mcp/www_authenticate'][0];
   assert.ok(challenge.includes(`error="${error}"`));
-  assert.ok(challenge.includes(`scope="${scope}"`));
+  assert.ok(challenge.includes(`scope="${scope} offline_access"`));
   assert.ok(challenge.includes('error_description="'));
   assert.ok(challenge.includes('resource_metadata="https://mediary.example.invalid/mediary/.well-known/oauth-protected-resource"'));
 }
@@ -52,6 +52,7 @@ async function authorize(url, scope = 'drafts:read drafts:write offline_access')
   assert.ok(page.headers.get('content-security-policy').includes(`form-action 'self' ${client.redirect_uris[0]};`));
   assert.equal(page.headers.get('referrer-policy'), 'same-origin');
   const html = await page.text();
+  assert.ok(html.includes(scope.split(' ').includes('offline_access') ? '自动保持连接' : '有效期1小时'));
   const ticket = /name="ticket" value="([^"]+)"/u.exec(html)[1];
   const csrf = /name="csrf" value="([^"]+)"/u.exec(html)[1];
   const cookie = page.headers.get('set-cookie').split(';')[0];
@@ -87,6 +88,19 @@ test('MCP-only health and discovery work without an AI key; medical data require
   const metadata = await (await fetch(`${url}/.well-known/oauth-authorization-server`)).json();
   assert.deepEqual(metadata.code_challenge_methods_supported, ['S256']); assert.ok(metadata.scopes_supported.includes('offline_access'));
   assert.equal((await (await fetch(`${url}/.well-known/oauth-protected-resource`)).json()).resource, resource);
+}));
+
+test('discovered scopes request renewable access while a client can still choose a one-hour read-only grant', async () => service(async url => {
+  const metadata = await (await fetch(`${url}/.well-known/oauth-protected-resource`)).json();
+  assert.deepEqual(metadata.scopes_supported, ['drafts:read', 'drafts:write', 'offline_access']);
+  const challenge = await fetch(`${url}/mcp`);
+  assert.ok(challenge.headers.get('www-authenticate').includes('scope="drafts:read drafts:write offline_access"'));
+  const renewable = await authorize(url, metadata.scopes_supported.join(' '));
+  assert.equal(typeof renewable.refresh_token, 'string'); assert.equal(renewable.expires_in, 3600);
+  const limited = await authorize(url, 'drafts:read');
+  assert.equal(limited.refresh_token, undefined); assert.equal(limited.scope, 'drafts:read');
+  const status = (await (await rpc(url, limited.access_token, 'tools/call', { name: 'get_sync_status' })).json()).result;
+  assert.equal(status.isError, undefined);
 }));
 
 test('authorization CSP permits only self and the exact registered callback for either ChatGPT callback format', async () => service(async url => {

@@ -19,7 +19,7 @@ export class OAuth {
       token_endpoint_auth_methods_supported: ['none'], code_challenge_methods_supported: ['S256'], scopes_supported: scopes };
   }
   resource() { return `${this.config.publicBaseUrl}/mcp`; }
-  protectedMetadata() { return { resource: this.resource(), authorization_servers: [this.config.publicBaseUrl], scopes_supported: scopes.slice(0, 2), resource_name: 'Mediary 草稿收件箱' }; }
+  protectedMetadata() { return { resource: this.resource(), authorization_servers: [this.config.publicBaseUrl], scopes_supported: scopes, resource_name: 'Mediary 草稿收件箱' }; }
   register(body) {
     if (!body || !Array.isArray(body.redirect_uris) || !body.redirect_uris.length || body.redirect_uris.length > 5 || !body.redirect_uris.every(allowedRedirect) ||
         (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== 'none') ||
@@ -45,11 +45,14 @@ export class OAuth {
     this.prune();
     if (this.forms.size >= 200) throw new ApiError(429, '授权请求较多，请稍后重试');
     const details = this.validateAuthorization(params);
+    const connectionNotice = details.scope.split(' ').includes('offline_access')
+      ? '允许自动保持连接；连续30天未使用刷新凭据后需要重新授权。'
+      : '本次连接有效期1小时，到期后需要重新授权。';
     const ticket = random(); const csrf = random();
     this.forms.set(ticket, { ...details, csrf, expires: Date.now() + 600_000 });
     return { redirectUri: details.redirectUri,
       cookie: `mediary_oauth=${csrf}; HttpOnly; Secure; SameSite=Lax; Path=${new URL(this.config.publicBaseUrl).pathname.replace(/\/$/u, '')}/oauth; Max-Age=600`,
-      html: `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接 Mediary</title><body><main><h1>连接 Mediary</h1><p>连接名称：${escape(details.clientName)}</p><p>允许此连接${details.scope.includes('drafts:read') ? '读取草稿' : ''}${details.scope.includes('drafts:write') ? '、创建待核对草稿' : ''}。它不能启用提醒，也不能读取手机服药历史。</p><p>只有你自己的连接才应获准。请在此输入 Mediary 服务访问口令，不要把口令发到聊天中。</p><form method="post" action="${escape(this.config.publicBaseUrl)}/oauth/authorize"><input type="hidden" name="ticket" value="${ticket}"><input type="hidden" name="csrf" value="${csrf}"><label>服务访问口令 <input name="password" type="password" autocomplete="current-password" required maxlength="4096"></label><p><button type="submit">授权连接</button></p></form><p>完成后仍需在手机逐项核对草稿并保存，才会安排提醒。</p></main></body></html>` };
+      html: `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接 Mediary</title><body><main><h1>连接 Mediary</h1><p>连接名称：${escape(details.clientName)}</p><p>允许此连接${details.scope.includes('drafts:read') ? '读取草稿' : ''}${details.scope.includes('drafts:write') ? '、创建待核对草稿' : ''}。它不能启用提醒，也不能读取手机服药历史。</p><p>${connectionNotice}</p><p>只有你自己的连接才应获准。请在此输入 Mediary 服务访问口令，不要把口令发到聊天中。</p><form method="post" action="${escape(this.config.publicBaseUrl)}/oauth/authorize"><input type="hidden" name="ticket" value="${ticket}"><input type="hidden" name="csrf" value="${csrf}"><label>服务访问口令 <input name="password" type="password" autocomplete="current-password" required maxlength="4096"></label><p><button type="submit">授权连接</button></p></form><p>完成后仍需在手机逐项核对草稿并保存，才会安排提醒。</p></main></body></html>` };
   }
   authorize(body, cookie = '') {
     this.prune();
