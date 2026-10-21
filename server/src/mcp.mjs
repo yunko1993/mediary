@@ -89,7 +89,7 @@ export function mcpRoutes(config, store, readBody, diagnosticSink) {
       // 初始化与工具目录只包含公开协议资料；客户端先发现 OAuth 策略，才能在调用时引导登录。
       if (body.method === 'initialize') {
         result({ protocolVersion: ['2025-03-26', '2025-06-18'].includes(body.params?.protocolVersion) ? body.params.protocolVersion : '2025-06-18', capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'mediary', version: '0.2.4' }, instructions: `${instructions}\n使用本服务仅保存待核对草稿，不能启用提醒、查询或修改手机服药历史。` }); return true;
+          serverInfo: { name: 'mediary', version: '0.2.6' }, instructions: `${instructions}\n使用本服务仅保存待核对草稿，不能启用提醒、查询或修改手机服药历史。` }); return true;
       }
       if (body.method === 'ping') { result({}); return true; }
       if (body.method === 'tools/list') { result({ tools }); return true; }

@@ -17,6 +17,7 @@ class MediaryApplication : Application() {
         super.onCreate()
         applicationScope.launch {
             repository.refresh()
+            // 普通进程启动保留正在交付的到期稍后提醒；重启清理由 RecoveryReceiver 明确发起。
             scheduler.reschedule()
         }
     }

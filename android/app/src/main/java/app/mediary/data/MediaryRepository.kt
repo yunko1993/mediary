@@ -208,6 +208,17 @@ class MediaryRepository(context: Context, databaseName: String = "mediary.db") {
         refresh()
     }
 
+    /** 同一把锁内领取到期稍后提醒；旧广播不能消费重新延后的记录，也不能重复消费。 */
+    @Synchronized fun consumeSnooze(occurrence: Occurrence, now: Instant, expectedAt: Instant? = null): Boolean {
+        if (snapshot.value.plans.none { it == occurrence.plan } || !occurrence.plan.enabled || snapshot.value.state(occurrence.key) != null) return false
+        val snooze = snapshot.value.snoozes.find { it.key == occurrence.key } ?: return false
+        if (snooze.planId != occurrence.plan.id || snooze.plannedAt != occurrence.plannedAt || snooze.remindAt > now ||
+            (expectedAt != null && snooze.remindAt != expectedAt)) return false
+        val deleted = helper.writableDatabase.delete("snoozes", "occurrence_key = ? AND remind_at = ?", arrayOf(snooze.key, snooze.remindAt.toEpochMilli().toString())) == 1
+        refresh()
+        return deleted
+    }
+
     @Synchronized fun record(event: DoseEvent): Boolean {
         val previous = snapshot.value.state(event.key)
         if (event.action == DoseAction.UNDONE && previous == null) return false

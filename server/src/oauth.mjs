@@ -4,6 +4,7 @@ import { digest } from './store.mjs';
 
 const random = () => randomBytes(32).toString('base64url');
 const scopes = ['drafts:read', 'drafts:write', 'offline_access'];
+const pendingClientLifetime = 3600_000;
 const escape = text => String(text).replace(/[&<>"']/gu, value => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[value]);
 export const secretEquals = (actual, expected) => typeof actual === 'string' && typeof expected === 'string' && expected.length >= 24 && timingSafeEqual(Buffer.from(digest(actual)), Buffer.from(digest(expected)));
 const allowedRedirect = value => typeof value === 'string' && value.length <= 2048 && /^https:\/\/chatgpt\.com\/(?:connector_platform_oauth_redirect|connector\/oauth\/[A-Za-z0-9_-]+)$/u.test(value);
@@ -26,15 +27,25 @@ export class OAuth {
         (body.grant_types && (!Array.isArray(body.grant_types) || body.grant_types.some(grant => !['authorization_code', 'refresh_token'].includes(grant)))) ||
         (body.response_types && (!Array.isArray(body.response_types) || body.response_types.some(value => value !== 'code')))) throw new ApiError(400, 'OAuth 客户端参数无效；仅允许 ChatGPT HTTPS 回调');
     return this.store.change(state => {
-      if (state.clients.length >= 500) throw new ApiError(429, '授权连接数量已达上限');
+      const now = Date.now();
+      // 兼容已有授权：旧版客户端没有 authorizedAt，任何历史 grant 都证明它获准过。
+      const approved = new Set(state.grants.map(grant => grant.clientId));
+      for (const client of state.clients) if (approved.has(client.client_id)) client.authorizedAt ??= now;
+      state.clients = state.clients.filter(client => client.authorizedAt != null || client.registeredAt + pendingClientLifetime > now);
+      if (state.clients.length >= 500) {
+        const disposable = state.clients.findIndex(client => client.authorizedAt == null);
+        if (disposable < 0) throw new ApiError(429, '已授权连接数量已达上限');
+        state.clients.splice(disposable, 1);
+      }
       const client = { client_id: random(), redirect_uris: body.redirect_uris, client_name: typeof body.client_name === 'string' ? body.client_name.slice(0, 100) : 'ChatGPT', token_endpoint_auth_method: 'none',
-        grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] };
+        grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], registeredAt: now };
       state.clients.push(client); return client;
     });
   }
   validateAuthorization(params) {
     const client = this.store.state.clients.find(item => item.client_id === params.get('client_id'));
-    if (!client || !client.redirect_uris.includes(params.get('redirect_uri'))) throw new ApiError(400, 'OAuth 客户端或回调地址不匹配');
+    const approved = client && (client.authorizedAt != null || this.store.state.grants.some(grant => grant.clientId === client.client_id));
+    if (!client || (!approved && !(client.registeredAt + pendingClientLifetime > Date.now())) || !client.redirect_uris.includes(params.get('redirect_uri'))) throw new ApiError(400, 'OAuth 客户端或回调地址不匹配，请重新连接');
     const requested = (params.get('scope') || 'drafts:read drafts:write offline_access').split(' ').filter(Boolean);
     if (params.get('response_type') !== 'code' || params.get('code_challenge_method') !== 'S256' || !/^[A-Za-z0-9_-]{43}$/u.test(params.get('code_challenge') ?? '') ||
         params.get('resource') !== this.resource() || requested.some(scope => !scopes.includes(scope)) || !requested.some(scope => scope.startsWith('drafts:')) ||
@@ -62,6 +73,11 @@ export class OAuth {
     this.failures = this.failures.filter(time => Date.now() - time < 900_000);
     if (this.failures.length >= 20) throw new ApiError(429, '口令尝试过多，请 15 分钟后重试');
     if (!secretEquals(body.get('password'), this.config.token)) { this.failures.push(Date.now()); throw new ApiError(401, '服务访问口令无效'); }
+    this.store.change(state => {
+      const client = state.clients.find(item => item.client_id === pending.clientId);
+      if (!client) throw new ApiError(400, '授权页面已失效，请从 ChatGPT 重新连接');
+      client.authorizedAt ??= Date.now();
+    });
     this.forms.delete(body.get('ticket'));
     const code = random();
     this.codes.set(digest(code), { ...pending, expires: Date.now() + 300_000 });
@@ -73,7 +89,7 @@ export class OAuth {
     this.prune();
     const clientId = body.get('client_id');
     if (!this.store.state.clients.some(client => client.client_id === clientId) || body.get('resource') !== this.resource()) throw new ApiError(400, 'invalid_grant');
-    let grant; let previousRefresh;
+    let grant; let previousRefresh; let effectiveScope;
     if (body.get('grant_type') === 'authorization_code') {
       const key = digest(body.get('code') ?? '');
       grant = this.codes.get(key);
@@ -85,18 +101,23 @@ export class OAuth {
       previousRefresh = digest(body.get('refresh_token') ?? '');
       grant = this.store.state.grants.find(item => item.refreshHash === previousRefresh && item.clientId === clientId && item.refreshExpires > Date.now() && item.ownerHash === digest(this.config.token));
       if (!grant) throw new ApiError(400, 'invalid_grant');
-      const requested = body.get('scope');
-      if (requested && requested.split(' ').some(scope => !grant.scope.split(' ').includes(scope))) throw new ApiError(400, 'invalid_scope');
+      if (body.has('scope')) {
+        const requested = [...new Set(body.get('scope').split(' ').filter(Boolean))];
+        if (!requested.length || requested.some(scope => !grant.scope.split(' ').includes(scope))) throw new ApiError(400, 'invalid_scope');
+        effectiveScope = requested.join(' ');
+      }
     } else throw new ApiError(400, 'unsupported_grant_type');
-    const access = random(); const refresh = grant.scope.split(' ').includes('offline_access') ? random() : null;
+    // 刷新时的降权同时约束访问令牌与续期能力，不能只验证子集后又签回原权限。
+    effectiveScope ??= grant.scope;
+    const access = random(); const refresh = effectiveScope.split(' ').includes('offline_access') ? random() : null;
     const now = Date.now();
     this.store.change(state => {
       state.grants = state.grants.filter(item => item.refreshHash !== previousRefresh && (item.refreshExpires > now || item.accessExpires > now));
       if (state.grants.length >= 500) throw new ApiError(429, '授权数量已达上限');
-      state.grants.push({ clientId, scope: grant.scope, ownerHash: digest(this.config.token), resource: this.resource(), accessHash: digest(access),
+      state.grants.push({ clientId, scope: effectiveScope, ownerHash: digest(this.config.token), resource: this.resource(), accessHash: digest(access),
         refreshHash: refresh ? digest(refresh) : null, accessExpires: now + 3600_000, refreshExpires: refresh ? now + 30 * 86400_000 : 0 });
     });
-    return { access_token: access, token_type: 'Bearer', expires_in: 3600, scope: grant.scope, ...(refresh ? { refresh_token: refresh } : {}) };
+    return { access_token: access, token_type: 'Bearer', expires_in: 3600, scope: effectiveScope, ...(refresh ? { refresh_token: refresh } : {}) };
   }
   access(header, scope) {
     if (typeof header !== 'string' || !header.startsWith('Bearer ')) return false;

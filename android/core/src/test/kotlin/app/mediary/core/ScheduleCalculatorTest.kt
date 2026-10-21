@@ -66,6 +66,27 @@ class ScheduleCalculatorTest {
     }
 
     @Test(expected = IllegalArgumentException::class) fun doseMustIncludeConfirmedText() { plan().copy(dose = "").validate() }
+
+    @Test fun daylightSavingMissingClockRequiresReviewAndDoesNotDelayTheExistingClock() {
+        val dstZone = ZoneId.of("America/New_York")
+        val dstDay = LocalDate.of(2026, 3, 8)
+        val daily = plan().copy(start = dstDay, times = listOf(LocalTime.of(2, 30), LocalTime.of(3, 0)))
+        assertEquals(listOf(LocalTime.of(2, 30)), ScheduleCalculator.missingDailyTimes(daily, dstDay, dstZone))
+        val doses = ScheduleCalculator.onDate(daily, dstDay, dstZone)
+        assertEquals(listOf(LocalTime.of(3, 0)), doses.map { it.plannedAt.atZone(dstZone).toLocalTime() })
+        assertEquals(doses.single(), ScheduleCalculator.next(daily, dstDay.atStartOfDay(dstZone).toInstant(), dstZone))
+    }
+
+    @Test fun missingClockDoesNotCreateDuplicateKeysAndNormalDaysKeepTheOriginalClock() {
+        val dstZone = ZoneId.of("America/New_York")
+        val dstDay = LocalDate.of(2026, 3, 8)
+        val daily = plan().copy(start = dstDay.minusDays(1), times = listOf(LocalTime.of(2, 30), LocalTime.of(3, 30)))
+        val doses = ScheduleCalculator.onDate(daily, dstDay, dstZone)
+        assertEquals(1, doses.size)
+        assertEquals(doses.size, doses.map { it.key }.distinct().size)
+        assertEquals(2, ScheduleCalculator.onDate(daily, dstDay.minusDays(1), dstZone).size)
+        assertTrue(ScheduleCalculator.missingDailyTimes(daily.copy(enabled = false), dstDay, dstZone).isEmpty())
+    }
     @Test(expected = IllegalArgumentException::class) fun duplicateTimesAreRejected() { plan().copy(times = listOf(LocalTime.NOON, LocalTime.NOON)).validate() }
     @Test(expected = IllegalArgumentException::class) fun reversedCourseIsRejected() { plan().copy(end = day.minusDays(1)).validate() }
 }

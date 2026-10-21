@@ -49,7 +49,7 @@ class ReminderScheduler(private val context: Context, private val repository: Me
     }
 
     /** 每个计划只保留下一次系统闹钟；触发、重启、时区变化及计划变更后重新安排。 */
-    @Synchronized fun reschedule() {
+    @Synchronized fun reschedule(discardExpiredSnoozes: Boolean = false) {
         ensureChannel()
         val now = Instant.now()
         repository.snapshot.value.plans.forEach { plan ->
@@ -65,10 +65,17 @@ class ReminderScheduler(private val context: Context, private val repository: Me
             val plan = repository.snapshot.value.plans.find { it.id == snooze.planId }
             if (plan != null) {
                 val occurrence = Occurrence(plan, snooze.plannedAt)
-                alarmManager.cancel(snoozeIntent(occurrence, snooze.key))
-                if (snooze.key == occurrence.key && plan.enabled && snooze.remindAt > now && repository.snapshot.value.state(snooze.key) == null) {
-                    scheduleAt(snooze.remindAt.toEpochMilli(), snoozeIntent(occurrence))
-                } else repository.clearSnooze(snooze.key)
+                val date = snooze.plannedAt.atZone(ZoneId.systemDefault()).toLocalDate()
+                val valid = snooze.key == occurrence.key && plan.enabled && repository.snapshot.value.state(snooze.key) == null &&
+                    ScheduleCalculator.onDate(plan, date, ZoneId.systemDefault()).any { it.key == snooze.key }
+                if (!valid || (discardExpiredSnoozes && snooze.remindAt <= now)) {
+                    alarmManager.cancel(snoozeIntent(occurrence, snooze.key))
+                    repository.clearSnooze(snooze.key)
+                } else if (snooze.remindAt > now) {
+                    alarmManager.cancel(snoozeIntent(occurrence, snooze.key))
+                    scheduleAt(snooze.remindAt.toEpochMilli(), snoozeIntent(occurrence, remindAt = snooze.remindAt.toEpochMilli()))
+                }
+                // 普通冷启动保留已到时的记录与在途闹钟，由接收器领取；重启恢复才丢弃过期项。
             } else repository.clearSnooze(snooze.key)
         }
     }
@@ -99,14 +106,15 @@ class ReminderScheduler(private val context: Context, private val repository: Me
     fun snooze(occurrence: Occurrence) {
         val remindAt = Instant.now().plusSeconds(600)
         repository.snooze(occurrence, remindAt)
-        scheduleAt(remindAt.toEpochMilli(), snoozeIntent(occurrence))
+        scheduleAt(remindAt.toEpochMilli(), snoozeIntent(occurrence, remindAt = remindAt.toEpochMilli()))
         notificationManager.cancel(occurrence.key, 0)
     }
 
-    private fun snoozeIntent(occurrence: Occurrence, key: String = occurrence.key): PendingIntent = PendingIntent.getBroadcast(context, 0,
+    private fun snoozeIntent(occurrence: Occurrence, key: String = occurrence.key, remindAt: Long = 0): PendingIntent = PendingIntent.getBroadcast(context, 0,
         Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_REMIND; data = "mediary://snooze/${Uri.encode(key)}".toUri()
             putExtra("planId", occurrence.plan.id); putExtra("plannedAt", occurrence.plannedAt.toEpochMilli()); putExtra("personId", occurrence.plan.personId)
+            putExtra("remindAt", remindAt)
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
     fun dismiss(occurrence: Occurrence) {
@@ -207,8 +215,8 @@ class ReminderReceiver : BroadcastReceiver() {
                     ReminderScheduler.ACTION_REMIND -> {
                         if (intent.data?.host == "snooze") {
                             // 编辑已移除旧稍后提醒；即使进程在取消系统闹钟前退出，也不能发送孤立通知。
-                            if (app.repository.snapshot.value.snoozes.none { it.key == occurrence.key }) return@launch
-                            app.repository.clearSnooze(occurrence.key)
+                            val expectedAt = intent.getLongExtra("remindAt", 0).takeIf { it > 0 }?.let(Instant::ofEpochMilli)
+                            if (!app.repository.consumeSnooze(occurrence, Instant.now(), expectedAt)) return@launch
                         }
                         app.scheduler.notify(occurrence)
                     }
@@ -233,7 +241,10 @@ class RecoveryReceiver : BroadcastReceiver() {
         val pending = goAsync()
         val app = context.applicationContext as MediaryApplication
         app.applicationScope.launch {
-            try { app.repository.refresh(); app.scheduler.reschedule() } finally { pending.finish() }
+            try {
+                app.repository.refresh()
+                app.scheduler.reschedule(discardExpiredSnoozes = intent.action != "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED")
+            } finally { pending.finish() }
         }
     }
 }

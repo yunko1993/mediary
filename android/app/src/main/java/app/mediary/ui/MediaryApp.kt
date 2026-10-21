@@ -147,6 +147,9 @@ private fun TodayScreen(snapshot: Snapshot, now: Instant, record: (Occurrence) -
     val today = now.atZone(zone).toLocalDate()
     var selectedDay by remember { mutableStateOf(today) }
     val occurrences = snapshot.plans.flatMap { ScheduleCalculator.onDate(it, selectedDay, zone) }.sortedBy { it.plannedAt }
+    val missingClocks = snapshot.plans.mapNotNull { plan ->
+        ScheduleCalculator.missingDailyTimes(plan, selectedDay, zone).takeIf { it.isNotEmpty() }?.let { plan to it }
+    }
     val taken = occurrences.count { snapshot.state(it.key)?.action == DoseAction.TAKEN }
     val next = occurrences.firstOrNull { snapshot.state(it.key) == null && it.plannedAt >= now }
     LazyColumn(contentPadding = PaddingValues(bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -188,7 +191,14 @@ private fun TodayScreen(snapshot: Snapshot, now: Instant, record: (Occurrence) -
                 Spacer(Modifier.weight(1f)); TextButton(onClick = settings) { Icon(Icons.Outlined.NotificationsActive, null, Modifier.size(15.dp)); Spacer(Modifier.width(5.dp)); Text("检查提醒", fontSize = 12.sp) }
             }
         }
-        if (occurrences.isEmpty()) item {
+        items(missingClocks, key = { "clock-issue-${it.first.id}" }) { (plan, clocks) ->
+            SoftCard(Modifier.padding(horizontal = 24.dp)) {
+                Badge("提醒时间需要核对", color = Amber)
+                Text("${plan.personName} · ${plan.name}", fontWeight = FontWeight.Medium)
+                Text("${selectedDay} 的 ${clocks.joinToString("、") { it.format(clockFormat) }} 在当前时区因夏令时跳时不存在，请到药箱核对并调整提醒时间。", color = Amber, fontSize = 13.sp)
+            }
+        }
+        if (occurrences.isEmpty() && missingClocks.isEmpty()) item {
             SoftCard(Modifier.padding(horizontal = 24.dp)) {
                 Icon(Icons.Outlined.Spa, null, tint = Pine, modifier = Modifier.size(36.dp))
                 Text("这里会放好你的用药安排", fontWeight = FontWeight.Medium)

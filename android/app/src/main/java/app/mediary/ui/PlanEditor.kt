@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,7 +23,13 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+private data class ClockTarget(val initial: LocalTime, val index: Int? = null, val interval: Boolean = false)
+
+private fun editorClocks(text: String): List<LocalTime> = if (text.isBlank()) emptyList() else runCatching {
+    text.replace('，', ',').split(',').map { LocalTime.parse(it.trim().replace('：', ':'), DateTimeFormatter.ofPattern("H:mm")) }
+}.getOrDefault(emptyList())
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismiss: () -> Unit, onSave: (MedicationPlan) -> Unit,
     existing: MedicationPlan? = null, people: List<MedicationPerson> = listOf(MedicationPerson.self()), initialPersonId: String? = null) {
@@ -39,7 +46,7 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
     var end by remember { mutableStateOf(existing?.end?.toString().orEmpty()) }
     var confirmed by remember { mutableStateOf(false) }
     var inputError by remember { mutableStateOf<PlanInputException?>(null) }
-    var selectingTime by remember { mutableStateOf(false) }
+    var selectingTime by remember { mutableStateOf<ClockTarget?>(null) }
     // MCP 没有本机用药人标识，草稿必须显式选择归属；手动新增沿用当前筛选。
     var personId by remember { mutableStateOf(existing?.personId ?: if (draft == null) initialPersonId ?: MedicationPerson.SELF_ID else null) }
     fun edited() { confirmed = false; inputError = null }
@@ -87,13 +94,26 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
                                 }
                             }
                             Text("2次：08:00、18:00\n3次：08:00、12:00、18:00", color = Muted, fontSize = 12.sp)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                editorClocks(times).forEachIndexed { index, clock ->
+                                    InputChip(selected = false, onClick = { selectingTime = ClockTarget(clock, index) },
+                                        label = { Text(clock.format(clockFormat)) }, leadingIcon = { Icon(Icons.Outlined.Schedule, null, Modifier.size(16.dp)) },
+                                        trailingIcon = {
+                                            IconButton(onClick = { times = editorClocks(times).filterIndexed { i, _ -> i != index }.joinToString(", ") { it.format(clockFormat) }; edited() }, modifier = Modifier.size(24.dp)) {
+                                                Icon(Icons.Outlined.Close, "删除 ${clock.format(clockFormat)}", Modifier.size(14.dp))
+                                            }
+                                        }, modifier = Modifier.testTag("edit-clock-${clock.format(clockFormat)}"))
+                                }
+                            }
+                            Text("点钟点可打开时钟调整，× 可移除。", color = Muted, fontSize = 12.sp)
                             OutlinedTextField(times, { times = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("已确认的提醒钟点") }, placeholder = { Text("08:00, 18:00") }, isError = inputError?.field == PlanInputField.TIMES,
                                 supportingText = { Text("必填，可选择或手动输入；多个钟点用逗号分隔。每日几次不自动等同每隔几小时。") })
-                            OutlinedButton(onClick = { selectingTime = true }) { Text("选择钟点") }
+                            OutlinedButton(onClick = { selectingTime = ClockTarget(LocalTime.of(8, 0)) }) { Icon(Icons.Outlined.Schedule, null); Spacer(Modifier.width(8.dp)); Text("选择钟点") }
                         }
                         ScheduleKind.INTERVAL -> {
                             OutlinedTextField(hours, { hours = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("医嘱明确要求的间隔小时数") }, isError = inputError?.field == PlanInputField.INTERVAL_HOURS, singleLine = true)
                             OutlinedTextField(firstTime, { firstTime = it; edited() }, modifier = Modifier.fillMaxWidth(), label = { Text("开始日期的首次时间") }, placeholder = { Text("08:00") }, isError = inputError?.field == PlanInputField.FIRST_TIME, singleLine = true)
+                            OutlinedButton(onClick = { selectingTime = ClockTarget(editorClocks(firstTime).firstOrNull() ?: LocalTime.of(8, 0), interval = true) }) { Text("用时钟选择首次时间") }
                             existing?.anchor?.let { Text("原首次时刻：${it.atZone(ZoneId.systemDefault()).format(dateTimeFormat)}；未修改开始日期和首次钟点时保留原时刻。", color = Muted, fontSize = 12.sp) }
                             Text("间隔将跨午夜连续计算，不会每天重置。", color = Muted, fontSize = 12.sp)
                         }
@@ -119,17 +139,25 @@ fun PlanEditor(draft: ImportDraft?, saving: Boolean, saveError: String?, onDismi
             }
         }
     }
-    if (selectingTime) {
-        val now = LocalTime.now()
-        val picker = rememberTimePickerState(initialHour = now.hour, initialMinute = now.minute, is24Hour = true)
-        AlertDialog(onDismissRequest = { selectingTime = false }, title = { Text("选择提醒钟点") },
-            text = { TimeInput(picker, modifier = Modifier.testTag("clock-picker")) },
+    selectingTime?.let { target ->
+        val picker = rememberTimePickerState(initialHour = target.initial.hour, initialMinute = target.initial.minute, is24Hour = true)
+        var keyboard by remember { mutableStateOf(false) }
+        AlertDialog(onDismissRequest = { selectingTime = null }, title = { Text(if (target.index == null && !target.interval) "选择提醒钟点" else "调整提醒钟点") },
+            text = {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (keyboard) TimeInput(picker, modifier = Modifier.testTag("clock-picker"))
+                    else TimePicker(picker, modifier = Modifier.testTag("clock-dial"))
+                    TextButton(onClick = { keyboard = !keyboard }) { Text(if (keyboard) "表盘选择" else "键盘输入") }
+                }
+            },
             confirmButton = { TextButton(onClick = {
                 val selected = LocalTime.of(picker.hour, picker.minute).format(DateTimeFormatter.ofPattern("HH:mm"))
-                times = if (times.isBlank()) selected else "${times.trim()}, $selected"
-                selectingTime = false
+                if (target.interval) firstTime = selected
+                else if (target.index != null) times = editorClocks(times).mapIndexed { index, value -> if (index == target.index) selected else value.format(clockFormat) }.joinToString(", ")
+                else times = if (times.isBlank()) selected else "${times.trim()}, $selected"
+                selectingTime = null
                 edited()
-            }) { Text("添加钟点") } },
-            dismissButton = { TextButton(onClick = { selectingTime = false }) { Text("取消") } })
+            }) { Text(if (target.index == null && !target.interval) "添加钟点" else "应用钟点") } },
+            dismissButton = { TextButton(onClick = { selectingTime = null }) { Text("取消") } })
     }
 }

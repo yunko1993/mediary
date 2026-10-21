@@ -73,11 +73,20 @@ data class DoseEvent(
 )
 
 object ScheduleCalculator {
+    /** 跳时当天不存在的本地钟点必须由用户核对，不能自动平移成另一剂的实际时刻。 */
+    fun missingDailyTimes(plan: MedicationPlan, date: LocalDate, zone: ZoneId): List<LocalTime> {
+        if (!plan.enabled || plan.kind != ScheduleKind.DAILY || date < plan.start || (plan.end != null && date > plan.end)) return emptyList()
+        return plan.times.filter { zone.rules.getValidOffsets(date.atTime(it)).isEmpty() }.sorted()
+    }
+
     fun onDate(plan: MedicationPlan, date: LocalDate, zone: ZoneId): List<Occurrence> {
         if (!plan.enabled || date < plan.start || (plan.end != null && date > plan.end)) return emptyList()
         return when (plan.kind) {
             ScheduleKind.AS_NEEDED -> emptyList()
-            ScheduleKind.DAILY -> plan.times.sorted().map { Occurrence(plan, date.atTime(it).atZone(zone).toInstant()) }
+            ScheduleKind.DAILY -> {
+                val missing = missingDailyTimes(plan, date, zone).toSet()
+                plan.times.filterNot { it in missing }.map { Occurrence(plan, date.atTime(it).atZone(zone).toInstant()) }.sortedBy { it.plannedAt }
+            }
             ScheduleKind.INTERVAL -> {
                 val anchor = plan.anchor ?: return emptyList()
                 val step = (plan.intervalHours ?: return emptyList()) * 3600L

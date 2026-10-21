@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.activity.compose.setContent
 import app.mediary.MainActivity
 import app.mediary.core.InstructionDraft
@@ -19,6 +21,9 @@ import org.junit.Test
 
 class PlanEditorTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    private val hourNine = hasText("9") or hasText("09") or SemanticsMatcher("时钟上的 9 点") { node ->
+        node.config.getOrNull(SemanticsProperties.ContentDescription)?.any { Regex("(?<!\\d)0?9(?!\\d)").containsMatchIn(it) } == true
+    }
 
     // 使用应用自带 Activity，正式签名包也能验证；页面仅注入虚拟计划，不保存到日常数据库。
     private fun show(content: @Composable () -> Unit) {
@@ -51,6 +56,8 @@ class PlanEditorTest {
         compose.onNodeWithTag("person-selector").performScrollTo().performClick()
         compose.onNodeWithTag("person-choice-self").performClick()
         compose.onNodeWithText("选择钟点").performScrollTo().performClick()
+        compose.onNodeWithTag("clock-dial").assertIsDisplayed()
+        compose.onNodeWithText("键盘输入").performClick()
         val fields = compose.onAllNodes(hasSetTextAction() and hasAnyAncestor(hasTestTag("clock-picker")))
         fields[0].performTextReplacement("08")
         fields[1].performTextReplacement("00")
@@ -126,6 +133,35 @@ class PlanEditorTest {
         compose.onNode(isToggleable()).performScrollTo().performClick()
         compose.onNodeWithText("确认并保存计划").performClick()
         compose.runOnIdle { assertEquals(father.id, saved!!.personId); assertEquals("爸爸", saved!!.personName) }
+    }
+
+    @Test fun existingClockOpensTheDialAndReplacesInsteadOfAppendingTheTime() {
+        var saved: MedicationPlan? = null
+        val original = MedicationPlan(name = "测试药", dose = "1片", times = listOf(LocalTime.of(8, 0), LocalTime.of(18, 0)), start = LocalDate.now())
+        show { MaterialTheme { PlanEditor(null, false, null, {}, { saved = it }, existing = original) } }
+        compose.onNodeWithTag("edit-clock-08:00").performScrollTo().performClick()
+        compose.onNodeWithTag("clock-dial").assertIsDisplayed()
+        compose.onNode(hourNine, useUnmergedTree = true).performClick()
+        compose.onNodeWithText("应用钟点").performClick()
+        compose.onNodeWithTag("edit-clock-09:00").assertExists()
+        compose.onNodeWithText("确认并保存计划").assertIsNotEnabled()
+        compose.onNode(isToggleable()).performScrollTo().performClick()
+        compose.onNodeWithText("确认并保存计划").performClick()
+        compose.runOnIdle {
+            assertEquals(original.id, saved!!.id)
+            assertEquals(listOf(LocalTime.of(9, 0), LocalTime.of(18, 0)), saved!!.times)
+        }
+    }
+
+    @Test fun cancellingClockChangesKeepsTheOriginalTimeAndConfirmation() {
+        val original = MedicationPlan(name = "测试药", dose = "1片", times = listOf(LocalTime.of(8, 0)), start = LocalDate.now())
+        show { MaterialTheme { PlanEditor(null, false, null, {}, {}, existing = original) } }
+        compose.onNode(isToggleable()).performScrollTo().performClick()
+        compose.onNodeWithTag("edit-clock-08:00").performScrollTo().performClick()
+        compose.onNode(hourNine, useUnmergedTree = true).performClick()
+        compose.onNodeWithText("取消").performClick()
+        compose.onNodeWithTag("edit-clock-08:00").assertExists()
+        compose.onNodeWithText("确认并保存计划").assertIsEnabled()
     }
 
 }
